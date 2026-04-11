@@ -52,12 +52,14 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	flows := memory.NewFlowStore()
 	sessions := memory.NewSessionStore()
 
+	httpBaseURL := "http://localhost" + cfg.HTTPAddr
 	router := httpapi.NewRouter(httpapi.Dependencies{
 		Users:    users,
 		Groups:   groups,
 		Flows:    flows,
 		Sessions: sessions,
 		APIKey:   cfg.APIKey,
+		BaseURL:  httpBaseURL,
 	})
 
 	httpServer := &http.Server{

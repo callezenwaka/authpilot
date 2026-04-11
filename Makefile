@@ -1,4 +1,4 @@
-.PHONY: build test lint check-ports run run-auto run-default run-bg stop health admin-build
+.PHONY: build test lint check-ports run run-auto run-default run-bg stop health admin-build notify-build
 
 RUN_HTTP_ADDR ?= :18025
 RUN_PROTOCOL_ADDR ?= :18026
@@ -159,3 +159,6 @@ health:
 
 admin-build:
 	cd client/admin-spa && npm run build
+
+notify-build:
+	cd client/notify-spa && npm run build

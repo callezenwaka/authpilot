@@ -39,6 +39,7 @@ docker compose up --build
 | `make stop` | Stop the tracked process |
 | `make stop ALL=1` | Broader cleanup including default ports |
 | `make admin-build` | Build the Vue admin SPA |
+| `make notify-build` | Build the Vue notification hub SPA |
 
 Override ports at invocation time:
 
@@ -105,7 +106,7 @@ Served on `:8025` under `/api/v1`. Every response includes an `X-Request-ID` hea
 | Flows | `GET/POST /api/v1/flows`, `GET /api/v1/flows/{id}` |
 | Flow actions | `POST /api/v1/flows/{id}/select-user` · `verify-mfa` · `approve` · `deny` |
 | Sessions | `GET /api/v1/sessions` |
-| Notifications | `GET /api/v1/notifications?flow_id=<id>` |
+| Notifications | `GET /api/v1/notifications?flow_id=<id>`, `GET /api/v1/notifications/all` |
 
 Errors follow a standard envelope:
 
@@ -148,6 +149,15 @@ The login UI at `/login` lets you pick any seeded user and walk through a flow w
 | `slow_mfa` | Push approval delayed 10 seconds |
 | `expired_token` | Tokens issued with negative TTL |
 
+MFA methods available (set on user):
+
+| Method | Behaviour |
+|--------|-----------|
+| `totp` | 6-digit time-based code; visible in Notification Hub |
+| `push` | Approve/deny push notification; visible in Notification Hub |
+| `sms` | 6-digit code sent to phone; visible in Notification Hub |
+| `magic_link` | One-click sign-in link; visible in Notification Hub |
+
 ## Admin UI
 
 ```bash
@@ -162,12 +172,31 @@ Then visit `http://localhost:8025/admin`. Re-run after code changes if the page 
 - **Groups** — list, create, edit (including member IDs), delete
 - **Sessions** — list with expandable detail rows
 
+## Notification Hub
+
+The notification hub intercepts outbound MFA messages (TOTP codes, push requests, SMS codes, magic links) during local testing — no real delivery provider needed.
+
+```bash
+make notify-build
+```
+
+Then visit `http://localhost:8025/notify`. Re-run after code changes if the page is stale.
+
+**Tabs:**
+- **TOTP** — 6-digit codes with countdown timer; copy or navigate directly to the MFA page
+- **Push** — pending push approvals; approve or deny
+- **SMS** — outbound SMS codes; copy to paste into the MFA page
+- **Magic Links** — one-click sign-in links; click to complete login
+
+The hub polls `/api/v1/notifications/all` every 3 seconds.
+
 ## Folder Structure
 
 ```text
 .
 ├── client/
-│   └── admin-spa/        # Vue 3 admin SPA
+│   ├── admin-spa/        # Vue 3 admin SPA
+│   └── notify-spa/       # Vue 3 notification hub SPA
 ├── server/
 │   ├── cmd/authpilot/    # Binary entrypoint
 │   ├── internal/
@@ -176,6 +205,7 @@ Then visit `http://localhost:8025/admin`. Re-run after code changes if the page 
 │   │   ├── domain/       # Core models
 │   │   ├── flow/         # Flow state machine
 │   │   ├── httpapi/      # Web UI and management API handlers
+│   │   ├── notify/       # MFA notification payload generation
 │   │   ├── oidc/         # OIDC engine
 │   │   └── store/        # Memory and SQLite stores
 │   └── web/

@@ -53,19 +53,31 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
 
 var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Authpilot MFA</title></head>
+<head><meta charset="utf-8"><title>Authpilot MFA</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:440px;margin:60px auto;padding:0 20px;color:#111}
+  h1{font-size:1.4rem;margin-bottom:4px}
+  .sub{color:#6b7280;font-size:.9rem;margin-bottom:24px}
+  .hub-link{display:inline-block;margin-top:16px;font-size:.85rem;color:#2563eb;text-decoration:none}
+  .hub-link:hover{text-decoration:underline}
+  input[type=text]{width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:1rem;margin-bottom:12px}
+  button{padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:.95rem;cursor:pointer}
+  button:hover{background:#1d4ed8}
+  .err{color:#dc2626;margin-bottom:12px;font-size:.9rem}
+  .spinner{width:32px;height:32px;border:3px solid #e2e4ea;border-top-color:#2563eb;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
+  @keyframes spin{to{rotate:360deg}}
+  .waiting{color:#6b7280;font-size:.95rem}
+</style>
+</head>
 <body>
   <h1>Multi-Factor Authentication</h1>
-  <p>Flow ID: {{.FlowID}}</p>
-  <p>User: {{.User.DisplayName}} ({{.User.Email}})</p>
-  <p>State: {{.Flow.State}}</p>
-  {{if .HasError}}<p style="color:#b00">{{.Error}}</p>{{end}}
+  <p class="sub">{{.User.DisplayName}} ({{.User.Email}})</p>
+  {{if .HasError}}<p class="err">{{.Error}}</p>{{end}}
 
   {{if eq .User.MFAMethod "push"}}
-    <p>Waiting for push approval...</p>
-    <form method="post" action="/api/v1/flows/{{.FlowID}}/approve">
-      <button type="submit">Approve Push</button>
-    </form>
+    <div class="spinner"></div>
+    <p class="waiting">Waiting for push approval on your device…</p>
+    <a class="hub-link" href="/notify" target="_blank">→ Open approval screen</a>
     <script>
       const flowId = {{printf "%q" .FlowID}};
       setInterval(async () => {
@@ -77,11 +89,35 @@ var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
         }
       }, 2000);
     </script>
-  {{else}}
+  {{else if eq .User.MFAMethod "magic_link"}}
+    <p>We sent a sign-in link to <strong>{{.User.Email}}</strong>.</p>
+    <p class="waiting">Click the link in your email to continue.</p>
+    <a class="hub-link" href="/notify" target="_blank">→ View email in notification hub</a>
+    <script>
+      const flowId = {{printf "%q" .FlowID}};
+      setInterval(async () => {
+        const res = await fetch('/api/v1/flows/' + flowId);
+        if (!res.ok) return;
+        const flow = await res.json();
+        if (flow.state === 'mfa_approved' || flow.state === 'complete') {
+          window.location.href = '/login/mfa?flow_id=' + flowId;
+        }
+      }, 2000);
+    </script>
+  {{else if eq .User.MFAMethod "sms"}}
+    <p>Enter the code sent to {{.User.PhoneNumber}}:</p>
     <form method="post" action="/login/mfa?flow_id={{.FlowID}}">
-      <label>Code <input type="text" name="code" required></label>
+      <input type="text" name="code" placeholder="000000" autocomplete="one-time-code" required>
       <button type="submit">Verify</button>
     </form>
+    <a class="hub-link" href="/notify" target="_blank">→ View SMS in notification hub</a>
+  {{else}}
+    <p>Enter the code from your authenticator app:</p>
+    <form method="post" action="/login/mfa?flow_id={{.FlowID}}">
+      <input type="text" name="code" placeholder="000000" autocomplete="one-time-code" required>
+      <button type="submit">Verify</button>
+    </form>
+    <a class="hub-link" href="/notify" target="_blank">→ View code in notification hub</a>
   {{end}}
 </body>
 </html>`))

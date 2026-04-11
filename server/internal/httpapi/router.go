@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"authpilot/server/internal/domain"
+	"authpilot/server/internal/notify"
 	"authpilot/server/internal/store"
 )
 
@@ -22,7 +23,9 @@ type Dependencies struct {
 	Flows          store.FlowStore
 	Sessions       store.SessionStore
 	AdminStaticDir string
+	NotifyStaticDir string
 	APIKey         string // empty = local dev mode (no auth required)
+	BaseURL        string // e.g. "http://localhost:8025" — used for magic link URLs
 }
 
 func NewRouter(dep Dependencies) http.Handler {
@@ -30,6 +33,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Use(requestIDMiddleware)
 
 	registerAdminRoutes(r, dep.AdminStaticDir)
+	registerNotifyRoutes(r, dep.NotifyStaticDir)
 
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
 	r.HandleFunc("/login", loginPageHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
@@ -37,6 +41,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.HandleFunc("/login/mfa", loginMFAHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
 	r.HandleFunc("/login/mfa", loginMFASubmitHandler(dep.Flows, dep.Users)).Methods(http.MethodPost)
 	r.HandleFunc("/login/complete", loginCompleteHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
+	r.HandleFunc("/login/magic", loginMagicHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
 
 	api := r.PathPrefix("/api/v1").Subrouter()
 	api.Use(apiKeyMiddleware(dep.APIKey))
@@ -62,7 +67,8 @@ func NewRouter(dep Dependencies) http.Handler {
 	api.HandleFunc("/flows/{id}/deny", denyFlowHandler(dep.Flows)).Methods(http.MethodPost)
 
 	api.HandleFunc("/sessions", listSessionsHandler(dep.Sessions)).Methods(http.MethodGet)
-	api.HandleFunc("/notifications", listNotificationsHandler(dep.Flows)).Methods(http.MethodGet)
+	api.HandleFunc("/notifications", listNotificationsHandler(dep.Flows, dep.Users, dep.BaseURL)).Methods(http.MethodGet)
+	api.HandleFunc("/notifications/all", listAllNotificationsHandler(dep.Flows, dep.Users, dep.BaseURL)).Methods(http.MethodGet)
 
 	return r
 }
@@ -308,7 +314,8 @@ func listSessionsHandler(sessions store.SessionStore) http.HandlerFunc {
 	}
 }
 
-func listNotificationsHandler(flows store.FlowStore) http.HandlerFunc {
+// listNotificationsHandler returns the notification payload for a single flow.
+func listNotificationsHandler(flows store.FlowStore, users store.UserStore, baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := strings.TrimSpace(r.URL.Query().Get("flow_id"))
 		if flowID == "" {
@@ -324,26 +331,107 @@ func listNotificationsHandler(flows store.FlowStore) http.HandlerFunc {
 			writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), false)
 			return
 		}
-		// Return a notification stub reflecting the current flow state.
-		// M5 will expand this with real TOTP/push/SMS payloads.
-		writeJSON(w, http.StatusOK, map[string]any{
-			"flow_id": flow.ID,
-			"state":   flow.State,
-			"type":    notificationTypeForFlow(flow),
-		})
+		user, _ := users.GetByID(flow.UserID)
+		payload, updatedFlow, err := notify.GenerateFor(flow, user, baseURL)
+		if err != nil {
+			writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), false)
+			return
+		}
+		if updatedFlow.TOTPSecret != flow.TOTPSecret ||
+			updatedFlow.SMSCode != flow.SMSCode ||
+			updatedFlow.MagicLinkToken != flow.MagicLinkToken {
+			_, _ = flows.Update(updatedFlow)
+		}
+		writeJSON(w, http.StatusOK, payload)
 	}
 }
 
-func notificationTypeForFlow(flow domain.Flow) string {
-	switch flow.State {
-	case "mfa_pending":
-		return "mfa_challenge"
-	case "mfa_approved":
-		return "mfa_approved"
-	case "mfa_denied":
-		return "mfa_denied"
-	default:
-		return "none"
+// listAllNotificationsHandler returns payloads for all flows currently in mfa_pending.
+// Used by the /notify hub to show all pending approvals across users.
+func listAllNotificationsHandler(flows store.FlowStore, users store.UserStore, baseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		all, err := flows.List()
+		if err != nil {
+			writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), false)
+			return
+		}
+		var payloads []notify.Payload
+		for _, flow := range all {
+			if flow.State != "mfa_pending" {
+				continue
+			}
+			user, _ := users.GetByID(flow.UserID)
+			payload, updatedFlow, err := notify.GenerateFor(flow, user, baseURL)
+			if err != nil {
+				continue
+			}
+			if updatedFlow.TOTPSecret != flow.TOTPSecret ||
+				updatedFlow.SMSCode != flow.SMSCode ||
+				updatedFlow.MagicLinkToken != flow.MagicLinkToken {
+				_, _ = flows.Update(updatedFlow)
+			}
+			payloads = append(payloads, payload)
+		}
+		if payloads == nil {
+			payloads = []notify.Payload{}
+		}
+		writeJSON(w, http.StatusOK, payloads)
+	}
+}
+
+// registerNotifyRoutes serves the /notify Vue SPA.
+func registerNotifyRoutes(r *mux.Router, notifyStaticDir string) {
+	if notifyStaticDir == "" {
+		notifyStaticDir = filepath.Join("server", "web", "static", "notify")
+	}
+	indexPath := filepath.Join(notifyStaticDir, "index.html")
+	assets := http.StripPrefix("/notify/", http.FileServer(http.Dir(notifyStaticDir)))
+
+	r.PathPrefix("/notify/assets/").Handler(assets)
+	r.HandleFunc("/notify", serveAdminIndex(indexPath))
+	r.PathPrefix("/notify/").HandlerFunc(serveAdminIndex(indexPath))
+}
+
+// loginMagicHandler completes a flow via a magic link token.
+func loginMagicHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimSpace(r.URL.Query().Get("token"))
+		if token == "" {
+			writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "token is required")
+			return
+		}
+		all, err := flows.List()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			return
+		}
+		var matched *domain.Flow
+		for i := range all {
+			if all[i].MagicLinkToken == token && !all[i].MagicLinkUsed {
+				matched = &all[i]
+				break
+			}
+		}
+		if matched == nil {
+			writeError(w, http.StatusNotFound, "INVALID_REQUEST", "magic link not found or already used")
+			return
+		}
+		if matched.State != "mfa_pending" {
+			writeError(w, http.StatusConflict, "STATE_TRANSITION_INVALID", "flow is not awaiting MFA")
+			return
+		}
+		matched.State = "mfa_approved"
+		matched.MagicLinkUsed = true
+		updated, err := flows.Update(*matched)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			return
+		}
+		if user, err := users.GetByID(updated.UserID); err == nil {
+			user.NextFlow = "normal"
+			_, _ = users.Update(user)
+		}
+		http.Redirect(w, r, "/login/mfa?flow_id="+updated.ID, http.StatusFound)
 	}
 }
 

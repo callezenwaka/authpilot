@@ -43,6 +43,12 @@ type Flow struct {
 	PKCEChallenge string   `json:"pkce_challenge,omitempty"`
 	PKCEMethod    string   `json:"pkce_method,omitempty"`
 	AuthCode      string   `json:"-"` // not exposed; redeemed once at /token
+
+	// Notification fields — ephemeral, populated when MFA is pending
+	TOTPSecret      string `json:"-"`              // base32 TOTP secret for this flow
+	SMSCode         string `json:"-"`              // 6-digit code for SMS method
+	MagicLinkToken  string `json:"-"`              // opaque token for magic link
+	MagicLinkUsed   bool   `json:"magic_link_used,omitempty"`
 }
 
 type Session struct {
