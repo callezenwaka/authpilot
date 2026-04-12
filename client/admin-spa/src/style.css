@@ -68,6 +68,15 @@ body { margin: 0; background: var(--bg); }
 .sidebar nav a:hover { background: rgba(255,255,255,.07); color: #fff; }
 .sidebar nav a.router-link-active { background: var(--nav-active-bg); color: var(--nav-active); }
 
+.nav-section-label {
+  padding: 14px 10px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: rgba(255,255,255,.3);
+}
+
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 .topbar {
