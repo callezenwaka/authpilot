@@ -106,7 +106,7 @@ func TestE2E_OIDCClientLibrary(t *testing.T) {
 		Scopes:      []string{"openid", "email", "profile"},
 		Endpoint: oauth2.Endpoint{
 			AuthURL:  issuerURL + "/authorize",
-			TokenURL: issuerURL + "/token",
+			TokenURL: issuerURL + "/oauth2/token",
 		},
 	}
 
@@ -242,7 +242,7 @@ func TestE2E_OIDCClientLibrary(t *testing.T) {
 	staleForm := url.Values{}
 	staleForm.Set("grant_type", "refresh_token")
 	staleForm.Set("refresh_token", tokenResp.RefreshToken)
-	resp5, err := http.PostForm(issuerURL+"/token", staleForm)
+	resp5, err := http.PostForm(issuerURL+"/oauth2/token", staleForm)
 	if err != nil {
 		t.Fatalf("POST token (stale refresh): %v", err)
 	}

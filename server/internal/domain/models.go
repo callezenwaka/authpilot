@@ -30,9 +30,10 @@ type Flow struct {
 	Scenario  string    `json:"scenario,omitempty"`
 	Attempts  int       `json:"attempts,omitempty"`
 	Error     string    `json:"error,omitempty"`
-	Protocol  string    `json:"protocol"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Protocol    string     `json:"protocol"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 
 	// OIDC fields — populated when Protocol == "oidc"
 	ClientID      string   `json:"client_id,omitempty"`
@@ -52,11 +53,21 @@ type Flow struct {
 	MagicLinkUsed   bool   `json:"magic_link_used,omitempty"`
 }
 
+type SessionEvent struct {
+	Timestamp time.Time `json:"timestamp"`
+	Type      string    `json:"type"`
+	Details   string    `json:"details,omitempty"`
+}
+
 type Session struct {
-	ID           string    `json:"id"`
-	UserID       string    `json:"user_id"`
-	FlowID       string    `json:"flow_id"`
-	RefreshToken string    `json:"-"` // opaque; not exposed in API responses
-	CreatedAt    time.Time `json:"created_at"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	ID           string         `json:"id"`
+	UserID       string         `json:"user_id"`
+	FlowID       string         `json:"flow_id"`
+	Protocol     string         `json:"protocol,omitempty"`
+	Provider     string         `json:"provider,omitempty"`
+	ClientID     string         `json:"client_id,omitempty"`
+	Events       []SessionEvent `json:"events,omitempty"`
+	RefreshToken string         `json:"-"` // opaque; not exposed in API responses
+	CreatedAt    time.Time      `json:"created_at"`
+	ExpiresAt    time.Time      `json:"expires_at"`
 }

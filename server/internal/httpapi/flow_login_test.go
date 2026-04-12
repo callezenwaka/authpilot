@@ -177,6 +177,130 @@ func TestM2_InvalidTransitionsReturnConflict(t *testing.T) {
 	}
 }
 
+func TestM2_CompletedAt_SetOnTerminalState(t *testing.T) {
+	t.Run("complete_sets_completed_at", func(t *testing.T) {
+		router, users, flows := newFlowRouterForTest()
+		seedUser(t, users, "usr_cat1", "none", "normal")
+		seedFlow(t, flows, "flow_cat1")
+
+		rr := doJSON(t, router, http.MethodPost, "/api/v1/flows/flow_cat1/select-user", map[string]string{
+			"user_id": "usr_cat1",
+		})
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		got, _ := flows.GetByID("flow_cat1")
+		if got.State != string(flowengine.StateComplete) {
+			t.Fatalf("expected complete, got %q", got.State)
+		}
+		if got.CompletedAt == nil {
+			t.Fatal("expected CompletedAt to be set on complete state")
+		}
+	})
+
+	t.Run("mfa_denied_sets_completed_at", func(t *testing.T) {
+		router, _, flows := newFlowRouterForTest()
+		now := time.Now().UTC()
+		_, err := flows.Create(domain.Flow{
+			ID:        "flow_cat2",
+			State:     string(flowengine.StateMFAPending),
+			UserID:    "usr_cat2",
+			Scenario:  string(flowengine.ScenarioNormal),
+			Protocol:  "oidc",
+			CreatedAt: now,
+			ExpiresAt: now.Add(30 * time.Minute),
+		})
+		if err != nil {
+			t.Fatalf("seed flow: %v", err)
+		}
+
+		rr := doJSON(t, router, http.MethodPost, "/api/v1/flows/flow_cat2/deny", map[string]string{})
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		got, _ := flows.GetByID("flow_cat2")
+		if got.State != string(flowengine.StateMFADenied) {
+			t.Fatalf("expected mfa_denied, got %q", got.State)
+		}
+		if got.CompletedAt == nil {
+			t.Fatal("expected CompletedAt to be set on mfa_denied state")
+		}
+	})
+
+	t.Run("in_progress_flow_has_nil_completed_at", func(t *testing.T) {
+		_, _, flows := newFlowRouterForTest()
+		seedFlow(t, flows, "flow_cat3")
+		got, _ := flows.GetByID("flow_cat3")
+		if got.CompletedAt != nil {
+			t.Fatalf("expected CompletedAt to be nil for initiated flow, got %v", got.CompletedAt)
+		}
+	})
+}
+
+func TestM2_SlowMFA_StaysInMFAPendingThenAutoAdvances(t *testing.T) {
+	router, users, flows := newFlowRouterForTest()
+	seedUser(t, users, "usr_slow", "push", "slow_mfa")
+
+	// Seed a flow whose CreatedAt is fresh — delay has NOT elapsed.
+	nowFresh := time.Now().UTC()
+	_, err := flows.Create(domain.Flow{
+		ID:        "flow_slow_fresh",
+		State:     string(flowengine.StateInitiated),
+		Scenario:  string(flowengine.ScenarioSlowMFA),
+		Protocol:  "oidc",
+		CreatedAt: nowFresh,
+		ExpiresAt: nowFresh.Add(30 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("seed flow: %v", err)
+	}
+
+	pick := doJSON(t, router, http.MethodPost, "/api/v1/flows/flow_slow_fresh/select-user", map[string]string{
+		"user_id": "usr_slow",
+	})
+	if pick.Code != http.StatusOK {
+		t.Fatalf("select-user: expected 200, got %d body=%s", pick.Code, pick.Body.String())
+	}
+	got, _ := flows.GetByID("flow_slow_fresh")
+	if got.State != string(flowengine.StateMFAPending) {
+		t.Fatalf("expected mfa_pending immediately after select-user, got %q", got.State)
+	}
+
+	// Now approve — flow is fresh, should return 202 (delay not elapsed).
+	approve := doJSON(t, router, http.MethodPost, "/api/v1/flows/flow_slow_fresh/approve", map[string]string{})
+	if approve.Code != http.StatusAccepted {
+		t.Fatalf("approve during delay: expected 202, got %d body=%s", approve.Code, approve.Body.String())
+	}
+
+	// Seed a second flow with CreatedAt > 10s ago — delay HAS elapsed.
+	nowOld := time.Now().UTC().Add(-15 * time.Second)
+	_, err = flows.Create(domain.Flow{
+		ID:        "flow_slow_old",
+		State:     string(flowengine.StateMFAPending),
+		UserID:    "usr_slow",
+		Scenario:  string(flowengine.ScenarioSlowMFA),
+		Protocol:  "oidc",
+		CreatedAt: nowOld,
+		ExpiresAt: nowOld.Add(30 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("seed old flow: %v", err)
+	}
+
+	// GET the flow — getAndAutoAdvanceFlow should advance it to mfa_approved.
+	rr := doJSON(t, router, http.MethodGet, "/api/v1/flows/flow_slow_old", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get flow: expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var flowResp domain.Flow
+	if err := json.NewDecoder(rr.Body).Decode(&flowResp); err != nil {
+		t.Fatalf("decode flow: %v", err)
+	}
+	if flowResp.State != string(flowengine.StateMFAApproved) {
+		t.Fatalf("expected mfa_approved after delay elapsed, got %q", flowResp.State)
+	}
+}
+
 func TestM2_ScenarioInjectionBehavior(t *testing.T) {
 	router, users, flows := newFlowRouterForTest()
 

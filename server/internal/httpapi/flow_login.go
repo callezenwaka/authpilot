@@ -420,6 +420,7 @@ func applySelectUser(flows store.FlowStore, users store.UserStore, flowID, userI
 		}
 		flow.State = string(flowengine.StateError)
 		flow.Error = "account locked"
+		markTerminal(&flow)
 		updated, err := flows.Update(flow)
 		if err != nil {
 			return domain.Flow{}, http.StatusInternalServerError, "update_flow_failed", err.Error()
@@ -443,6 +444,7 @@ func applySelectUser(flows store.FlowStore, users store.UserStore, flowID, userI
 		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 	}
 	flow.State = string(flowengine.StateComplete)
+	markTerminal(&flow)
 	if scenario != flowengine.ScenarioNormal {
 		user.NextFlow = string(flowengine.ScenarioNormal)
 		_, _ = users.Update(user)
@@ -523,6 +525,7 @@ func approveOrDenyFlow(flows store.FlowStore, users store.UserStore, flowID stri
 			return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 		}
 		flow.State = string(flowengine.StateMFADenied)
+		markTerminal(&flow)
 	}
 
 	updated, err := flows.Update(flow)
@@ -536,6 +539,17 @@ func approveOrDenyFlow(flows store.FlowStore, users store.UserStore, flowID stri
 		}
 	}
 	return updated, 0, "", ""
+}
+
+// markTerminal stamps CompletedAt on the flow when it enters a terminal state.
+func markTerminal(flow *domain.Flow) {
+	switch flowengine.State(flow.State) {
+	case flowengine.StateComplete, flowengine.StateMFADenied, flowengine.StateError:
+		if flow.CompletedAt == nil {
+			now := time.Now().UTC()
+			flow.CompletedAt = &now
+		}
+	}
 }
 
 func getAndAutoAdvanceFlow(flows store.FlowStore, flowID string) (domain.Flow, error) {
@@ -562,6 +576,7 @@ func moveToComplete(flows store.FlowStore, flow domain.Flow) (domain.Flow, bool)
 		return flow, false
 	}
 	flow.State = string(flowengine.StateComplete)
+	markTerminal(&flow)
 	updated, err := flows.Update(flow)
 	if err != nil {
 		return flow, false

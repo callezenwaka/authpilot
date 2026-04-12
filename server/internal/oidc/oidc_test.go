@@ -294,7 +294,7 @@ func TestToken_InvalidCode(t *testing.T) {
 	form.Set("redirect_uri", "http://app/callback")
 	form.Set("code_verifier", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
 
-	resp, err := http.PostForm(srv.URL+"/token", form)
+	resp, err := http.PostForm(srv.URL+"/oauth2/token", form)
 	if err != nil {
 		t.Fatalf("POST token: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestToken_UnsupportedGrantType(t *testing.T) {
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
 
-	resp, err := http.PostForm(srv.URL+"/token", form)
+	resp, err := http.PostForm(srv.URL+"/oauth2/token", form)
 	if err != nil {
 		t.Fatalf("POST token: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestFullOIDCFlow(t *testing.T) {
 	form.Set("redirect_uri", "http://app/callback")
 	form.Set("code_verifier", verifier)
 
-	resp2, err := http.PostForm(srv.URL+"/token", form)
+	resp2, err := http.PostForm(srv.URL+"/oauth2/token", form)
 	if err != nil {
 		t.Fatalf("POST token: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestFullOIDCFlow(t *testing.T) {
 	}
 
 	// Step 4: second code redemption must fail (code consumed).
-	resp4, err := http.PostForm(srv.URL+"/token", form)
+	resp4, err := http.PostForm(srv.URL+"/oauth2/token", form)
 	if err != nil {
 		t.Fatalf("POST token (replay): %v", err)
 	}
@@ -481,7 +481,7 @@ func TestFullOIDCFlow(t *testing.T) {
 	refreshForm.Set("grant_type", "refresh_token")
 	refreshForm.Set("refresh_token", tokens.RefreshToken)
 
-	resp5, err := http.PostForm(srv.URL+"/token", refreshForm)
+	resp5, err := http.PostForm(srv.URL+"/oauth2/token", refreshForm)
 	if err != nil {
 		t.Fatalf("POST token (refresh): %v", err)
 	}
@@ -504,7 +504,7 @@ func TestFullOIDCFlow(t *testing.T) {
 	}
 
 	// Step 6: old refresh token must now be rejected.
-	resp6, err := http.PostForm(srv.URL+"/token", refreshForm)
+	resp6, err := http.PostForm(srv.URL+"/oauth2/token", refreshForm)
 	if err != nil {
 		t.Fatalf("POST token (old refresh token): %v", err)
 	}
@@ -522,7 +522,7 @@ func TestRefreshGrant_MissingToken(t *testing.T) {
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
 
-	resp, err := http.PostForm(srv.URL+"/token", form)
+	resp, err := http.PostForm(srv.URL+"/oauth2/token", form)
 	if err != nil {
 		t.Fatalf("POST token: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestRefreshGrant_UnknownToken(t *testing.T) {
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", "doesnotexist")
 
-	resp, err := http.PostForm(srv.URL+"/token", form)
+	resp, err := http.PostForm(srv.URL+"/oauth2/token", form)
 	if err != nil {
 		t.Fatalf("POST token: %v", err)
 	}

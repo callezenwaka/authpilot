@@ -203,11 +203,16 @@ func completeSAMLSSO(w http.ResponseWriter, r *http.Request, dep RouterDeps, flo
 	samlResponseB64 := base64.StdEncoding.EncodeToString(responseXML)
 
 	// Record a session.
+	now := time.Now().UTC()
 	session := domain.Session{
 		UserID:    user.ID,
 		FlowID:    flow.ID,
-		CreatedAt: time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(dep.SessionTTL),
+		Protocol:  "saml",
+		CreatedAt: now,
+		ExpiresAt: now.Add(dep.SessionTTL),
+		Events: []domain.SessionEvent{
+			{Timestamp: now, Type: "token_issued"},
+		},
 	}
 	_, _ = dep.Sessions.Create(session)
 

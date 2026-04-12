@@ -34,7 +34,7 @@ func NewRouter(dep RouterDeps) http.Handler {
 	r.HandleFunc("/.well-known/jwks.json", jwksHandler(dep.KeyMgr)).Methods(http.MethodGet)
 	r.HandleFunc("/authorize", authorizeHandler(dep)).Methods(http.MethodGet)
 	r.HandleFunc("/authorize/complete", authorizeCompleteHandler(dep)).Methods(http.MethodGet)
-	r.HandleFunc("/token", tokenHandler(dep)).Methods(http.MethodPost)
+	r.HandleFunc("/oauth2/token", tokenHandler(dep)).Methods(http.MethodPost)
 	r.HandleFunc("/userinfo", userinfoHandler(dep)).Methods(http.MethodGet, http.MethodPost)
 	r.HandleFunc("/revoke", revokeHandler()).Methods(http.MethodPost)
 	r.HandleFunc("/oauth2/introspect", introspectHandler(dep)).Methods(http.MethodPost)
@@ -52,7 +52,7 @@ func discoveryHandler(dep RouterDeps) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issuer":                                base,
 			"authorization_endpoint":                base + "/authorize",
-			"token_endpoint":                        base + "/token",
+			"token_endpoint":                        base + "/oauth2/token",
 			"userinfo_endpoint":                     base + "/userinfo",
 			"jwks_uri":                              base + "/.well-known/jwks.json",
 			"revocation_endpoint":                   base + "/revoke",
@@ -297,9 +297,14 @@ func handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps)
 		ID:           fmt.Sprintf("sess_%d", now.UnixNano()),
 		UserID:       matched.UserID,
 		FlowID:       matched.ID,
+		Protocol:     matched.Protocol,
+		ClientID:     matched.ClientID,
 		RefreshToken: tokens.RefreshToken,
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(dep.Issuer.cfg.RefreshTokenTTL),
+		Events: []domain.SessionEvent{
+			{Timestamp: now, Type: "token_issued"},
+		},
 	}
 	_, _ = dep.Sessions.Create(session)
 
@@ -346,6 +351,10 @@ func handleRefreshGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps) 
 	// Rotate: replace the old refresh token on the session.
 	session.RefreshToken = tokens.RefreshToken
 	session.ExpiresAt = time.Now().UTC().Add(dep.Issuer.cfg.RefreshTokenTTL)
+	session.Events = append(session.Events, domain.SessionEvent{
+		Timestamp: time.Now().UTC(),
+		Type:      "refreshed",
+	})
 	_, _ = dep.Sessions.Update(session)
 
 	w.Header().Set("Cache-Control", "no-store")
