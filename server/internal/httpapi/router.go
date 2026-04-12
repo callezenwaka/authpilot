@@ -18,6 +18,20 @@ import (
 	"authpilot/server/internal/store"
 )
 
+// MintedTokens is the response payload for POST /api/v1/tokens/mint.
+type MintedTokens struct {
+	AccessToken string `json:"access_token"`
+	IDToken     string `json:"id_token"`
+	ExpiresIn   int    `json:"expires_in"`
+}
+
+// TokenMinter issues tokens directly for a given user, bypassing the OAuth
+// flow. Used by POST /api/v1/tokens/mint.
+// Implemented by an adapter in app.go that wraps oidc.Issuer.
+type TokenMinter interface {
+	MintForUser(user domain.User, clientID string, scopes []string, expiresIn int) (MintedTokens, error)
+}
+
 type Dependencies struct {
 	Users           store.UserStore
 	Groups          store.GroupStore
@@ -30,6 +44,7 @@ type Dependencies struct {
 	BaseURL         string       // e.g. "http://localhost:8025" — used for magic link URLs
 	RateLimit       int          // requests per minute per IP; 0 = disabled
 	SCIMRouter      http.Handler // mounted at /scim/v2; nil = disabled
+	TokenMinter     TokenMinter  // nil = /tokens/mint endpoint returns 501
 }
 
 func NewRouter(dep Dependencies) http.Handler {
@@ -86,6 +101,8 @@ func NewRouter(dep Dependencies) http.Handler {
 	api.HandleFunc("/notifications", listNotificationsHandler(dep.Flows, dep.Users, dep.BaseURL)).Methods(http.MethodGet)
 	api.HandleFunc("/notifications/all", listAllNotificationsHandler(dep.Flows, dep.Users, dep.BaseURL)).Methods(http.MethodGet)
 
+	api.HandleFunc("/tokens/mint", mintTokenHandler(dep.Users, dep.TokenMinter)).Methods(http.MethodPost)
+
 	api.HandleFunc("/export", exportHandler(dep.Users, dep.Groups)).Methods(http.MethodGet)
 
 	// Mount SCIM 2.0 under /scim/v2 with its own credential.
@@ -112,6 +129,47 @@ func openAPISpecHandler(w http.ResponseWriter, r *http.Request) {
 func openAPIDocsHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(openAPIDocsHTML))
+}
+
+func mintTokenHandler(users store.UserStore, minter TokenMinter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if minter == nil {
+			writeAPIError(w, r, http.StatusNotImplemented, "NOT_IMPLEMENTED", "token minting is not configured", false)
+			return
+		}
+		var req struct {
+			UserID    string   `json:"user_id"`
+			ClientID  string   `json:"client_id"`
+			Scopes    []string `json:"scopes"`
+			ExpiresIn int      `json:"expires_in"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeAPIError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "invalid JSON body", false)
+			return
+		}
+		if req.UserID == "" {
+			writeAPIError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "user_id is required", false)
+			return
+		}
+		user, err := users.GetByID(req.UserID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeAPIError(w, r, http.StatusNotFound, "RESOURCE_NOT_FOUND", "user not found", false)
+				return
+			}
+			writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), false)
+			return
+		}
+		if req.ExpiresIn <= 0 {
+			req.ExpiresIn = 3600
+		}
+		tokens, err := minter.MintForUser(user, req.ClientID, req.Scopes, req.ExpiresIn)
+		if err != nil {
+			writeAPIError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), false)
+			return
+		}
+		writeJSON(w, http.StatusOK, tokens)
+	}
 }
 
 func exportHandler(users store.UserStore, groups store.GroupStore) http.HandlerFunc {

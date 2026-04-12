@@ -26,6 +26,7 @@ func buildOpenAPISpec() []byte {
 			map[string]any{"name": "Sessions"},
 			map[string]any{"name": "Notifications"},
 			map[string]any{"name": "Export"},
+			map[string]any{"name": "Tokens"},
 			map[string]any{"name": "SCIM"},
 			map[string]any{"name": "Meta"},
 		},
@@ -171,7 +172,25 @@ func components() map[string]any {
 					"Operations": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"op": map[string]any{"type": "string", "enum": []string{"add", "replace", "remove"}}, "path": map[string]any{"type": "string"}, "value": map[string]any{}}}},
 				},
 			},
-			"SCIMListResponse": map[string]any{
+			"MintRequest": map[string]any{
+					"type":     "object",
+					"required": []string{"user_id"},
+					"properties": map[string]any{
+						"user_id":    map[string]any{"type": "string", "example": "usr_001", "description": "ID of the user to mint tokens for"},
+						"client_id":  map[string]any{"type": "string", "example": "test-client"},
+						"scopes":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "example": []string{"openid", "email", "profile"}},
+						"expires_in": map[string]any{"type": "integer", "example": 3600, "description": "Token lifetime in seconds; defaults to 3600"},
+					},
+				},
+				"MintedTokens": map[string]any{
+					"type":     "object",
+					"properties": map[string]any{
+						"access_token": map[string]any{"type": "string", "description": "Signed JWT access token"},
+						"id_token":     map[string]any{"type": "string", "description": "Signed JWT ID token with user claims"},
+						"expires_in":   map[string]any{"type": "integer", "description": "Lifetime in seconds"},
+					},
+				},
+				"SCIMListResponse": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"schemas":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -351,6 +370,20 @@ func paths() map[string]any {
 			"get": op("listNotifications", "List all pending notifications", "Notifications", apiSecurity, nil, nil,
 				resp200("Array of notification payloads", arrayOf(ref("Notification"))),
 				apiErrs()),
+		},
+
+		// Tokens
+		"/api/v1/tokens/mint": map[string]any{
+			"post": op("mintToken", "Mint tokens for a user (CI/CD shortcut)", "Tokens", apiSecurity,
+				[]any{paramRef("IdempotencyKey")},
+				reqBody(ref("MintRequest")),
+				resp200("Minted access and ID tokens", jsonContent(ref("MintedTokens"))),
+				map[string]any{
+					"400": respRef("BadRequest"),
+					"404": respRef("NotFound"),
+					"401": respRef("Unauthorized"),
+					"429": respRef("TooManyRequests"),
+				}),
 		},
 
 		// Export

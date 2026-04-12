@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"authpilot/server/internal/config"
+	"authpilot/server/internal/domain"
 	"authpilot/server/internal/httpapi"
 	oidcengine "authpilot/server/internal/oidc"
 	samlengine "authpilot/server/internal/saml"
@@ -56,28 +57,6 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	sessions := memory.NewSessionStore()
 
 	httpBaseURL := "http://localhost" + cfg.HTTPAddr
-	scimRouter := scim.NewRouter(scim.RouterDeps{
-		Users:  users,
-		Groups: groups,
-	})
-	router := httpapi.NewRouter(httpapi.Dependencies{
-		Users:      users,
-		Groups:     groups,
-		Flows:      flows,
-		Sessions:   sessions,
-		APIKey:     cfg.APIKey,
-		SCIMKey:    cfg.SCIMKey,
-		BaseURL:    httpBaseURL,
-		RateLimit:  cfg.RateLimit,
-		SCIMRouter: scimRouter,
-	})
-
-	httpServer := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           router,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
 	km, err := oidcengine.NewKeyManager()
 	if err != nil {
 		return nil, fmt.Errorf("initialize oidc key manager: %w", err)
@@ -88,6 +67,30 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		RefreshTokenTTL: cfg.OIDC.RefreshTokenTTL,
 	}
 	issuer := oidcengine.NewIssuer(km, tokenCfg, cfg.OIDC.IssuerURL)
+
+	scimRouter := scim.NewRouter(scim.RouterDeps{
+		Users:  users,
+		Groups: groups,
+	})
+	router := httpapi.NewRouter(httpapi.Dependencies{
+		Users:       users,
+		Groups:      groups,
+		Flows:       flows,
+		Sessions:    sessions,
+		APIKey:      cfg.APIKey,
+		SCIMKey:     cfg.SCIMKey,
+		BaseURL:     httpBaseURL,
+		RateLimit:   cfg.RateLimit,
+		SCIMRouter:  scimRouter,
+		TokenMinter: &issuerMinter{issuer: issuer},
+	})
+
+	httpServer := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
 	loginURL := "http://localhost" + cfg.HTTPAddr + "/login"
 	oidcRouter := oidcengine.NewRouter(oidcengine.RouterDeps{
 		Flows:     flows,
@@ -225,4 +228,23 @@ func (a *App) startCleanupScheduler(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// issuerMinter adapts oidcengine.Issuer to the httpapi.TokenMinter interface.
+// It converts between the oidc-package return type and httpapi.MintedTokens,
+// avoiding a circular import between httpapi and oidc.
+type issuerMinter struct {
+	issuer *oidcengine.Issuer
+}
+
+func (m *issuerMinter) MintForUser(user domain.User, clientID string, scopes []string, expiresIn int) (httpapi.MintedTokens, error) {
+	t, err := m.issuer.MintForUser(user, clientID, scopes, expiresIn)
+	if err != nil {
+		return httpapi.MintedTokens{}, err
+	}
+	return httpapi.MintedTokens{
+		AccessToken: t.AccessToken,
+		IDToken:     t.IDToken,
+		ExpiresIn:   t.ExpiresIn,
+	}, nil
 }
