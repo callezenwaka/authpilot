@@ -3,6 +3,7 @@ package oidc
 import (
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	jose "github.com/go-jose/go-jose/v3"
@@ -38,12 +39,30 @@ type TokenSet struct {
 // Issuer builds and signs tokens for a completed flow.
 type Issuer struct {
 	km     *KeyManager
-	cfg    TokenConfig
+	cfg    atomic.Pointer[TokenConfig]
 	issuer string // e.g. "http://localhost:8026"
 }
 
 func NewIssuer(km *KeyManager, cfg TokenConfig, issuerURL string) *Issuer {
-	return &Issuer{km: km, cfg: cfg, issuer: issuerURL}
+	i := &Issuer{km: km, issuer: issuerURL}
+	i.cfg.Store(&cfg)
+	return i
+}
+
+// SetTokenConfig atomically replaces the token TTL configuration.
+// Safe to call concurrently; takes effect on the next token issuance.
+func (i *Issuer) SetTokenConfig(cfg TokenConfig) {
+	i.cfg.Store(&cfg)
+}
+
+// tokenConfig returns the current TokenConfig snapshot (internal use).
+func (i *Issuer) tokenConfig() TokenConfig {
+	return *i.cfg.Load()
+}
+
+// GetTokenConfig returns the current TokenConfig snapshot (external use).
+func (i *Issuer) GetTokenConfig() TokenConfig {
+	return *i.cfg.Load()
 }
 
 // Issue mints an access token, ID token, and refresh token for the given flow+user.
@@ -60,7 +79,7 @@ func (i *Issuer) Issue(flow domain.Flow, user domain.User) (TokenSet, error) {
 		"sub": user.ID,
 		"aud": flow.ClientID,
 		"iat": now.Unix(),
-		"exp": now.Add(i.cfg.AccessTokenTTL).Unix(),
+		"exp": now.Add(i.tokenConfig().AccessTokenTTL).Unix(),
 	})
 	if err != nil {
 		return TokenSet{}, fmt.Errorf("sign access token: %w", err)
@@ -71,7 +90,7 @@ func (i *Issuer) Issue(flow domain.Flow, user domain.User) (TokenSet, error) {
 		"sub":   user.ID,
 		"aud":   flow.ClientID,
 		"iat":   now.Unix(),
-		"exp":   now.Add(i.cfg.IDTokenTTL).Unix(),
+		"exp":   now.Add(i.tokenConfig().IDTokenTTL).Unix(),
 		"email": user.Email,
 		"name":  user.DisplayName,
 	}
@@ -110,7 +129,7 @@ func (i *Issuer) Issue(flow domain.Flow, user domain.User) (TokenSet, error) {
 	return TokenSet{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    int(i.cfg.AccessTokenTTL.Seconds()),
+		ExpiresIn:    int(i.tokenConfig().AccessTokenTTL.Seconds()),
 		IDToken:      idToken,
 		RefreshToken: refreshToken,
 		Scope:        scopeStr,
@@ -128,7 +147,7 @@ type MintedTokens struct {
 // bypassing the OAuth authorization flow. Used by POST /api/v1/tokens/mint.
 // expiresIn is in seconds; if ≤ 0, the issuer's AccessTokenTTL is used.
 func (i *Issuer) MintForUser(user domain.User, clientID string, scopes []string, expiresIn int) (MintedTokens, error) {
-	ttl := i.cfg.AccessTokenTTL
+	ttl := i.tokenConfig().AccessTokenTTL
 	if expiresIn > 0 {
 		ttl = time.Duration(expiresIn) * time.Second
 	}

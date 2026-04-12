@@ -56,6 +56,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	flows := memory.NewFlowStore()
 	sessions := memory.NewSessionStore()
 
+	if err := seedUsers(users, cfg.SeedUsers); err != nil {
+		return nil, fmt.Errorf("seed users: %w", err)
+	}
+
 	httpBaseURL := "http://localhost" + cfg.HTTPAddr
 	km, err := oidcengine.NewKeyManager()
 	if err != nil {
@@ -72,17 +76,19 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		Users:  users,
 		Groups: groups,
 	})
+	cp := &issuerConfigPatcher{issuer: issuer}
 	router := httpapi.NewRouter(httpapi.Dependencies{
-		Users:       users,
-		Groups:      groups,
-		Flows:       flows,
-		Sessions:    sessions,
-		APIKey:      cfg.APIKey,
-		SCIMKey:     cfg.SCIMKey,
-		BaseURL:     httpBaseURL,
-		RateLimit:   cfg.RateLimit,
-		SCIMRouter:  scimRouter,
-		TokenMinter: &issuerMinter{issuer: issuer},
+		Users:         users,
+		Groups:        groups,
+		Flows:         flows,
+		Sessions:      sessions,
+		APIKey:        cfg.APIKey,
+		SCIMKey:       cfg.SCIMKey,
+		BaseURL:       httpBaseURL,
+		RateLimit:     cfg.RateLimit,
+		SCIMRouter:    scimRouter,
+		TokenMinter:   &issuerMinter{issuer: issuer},
+		ConfigPatcher: cp,
 	})
 
 	httpServer := &http.Server{
@@ -161,6 +167,18 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 }
 
 func (a *App) Start(ctx context.Context) error {
+	a.logger.Info("authpilot starting",
+		"http_addr", a.cfg.HTTPAddr,
+		"protocol_addr", a.cfg.ProtocolAddr,
+		"log_level", a.cfg.LogLevel,
+		"persistence", a.cfg.Persistence.Enabled,
+		"rate_limit", a.cfg.RateLimit,
+		"seed_users", len(a.cfg.SeedUsers),
+		"oidc_issuer", a.cfg.OIDC.IssuerURL,
+		"access_token_ttl", a.cfg.OIDC.AccessTokenTTL,
+		"id_token_ttl", a.cfg.OIDC.IDTokenTTL,
+		"refresh_token_ttl", a.cfg.OIDC.RefreshTokenTTL,
+	)
 	a.startCleanupScheduler(ctx)
 
 	errCh := make(chan error, 2)
@@ -228,6 +246,77 @@ func (a *App) startCleanupScheduler(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// seedUsers upserts each seed user into the store. Create is tried first;
+// if the record already exists it is updated so re-starts are idempotent.
+func seedUsers(users store.UserStore, seeds []config.SeedUser) error {
+	for _, s := range seeds {
+		active := true
+		if s.Active != nil {
+			active = *s.Active
+		}
+		u := domain.User{
+			ID:          s.ID,
+			Email:       s.Email,
+			DisplayName: s.DisplayName,
+			Groups:      s.Groups,
+			MFAMethod:   s.MFAMethod,
+			NextFlow:    s.NextFlow,
+			Active:      active,
+			Claims:      s.Claims,
+			PhoneNumber: s.PhoneNumber,
+			CreatedAt:   time.Now().UTC(),
+		}
+		if _, err := users.Create(u); err != nil {
+			// Already exists — update instead so re-starts stay idempotent.
+			if _, err2 := users.Update(u); err2 != nil {
+				return fmt.Errorf("upsert seed user %q: %w", s.ID, err2)
+			}
+		}
+	}
+	return nil
+}
+
+// issuerConfigPatcher adapts oidcengine.Issuer to the httpapi.ConfigPatcher interface.
+type issuerConfigPatcher struct {
+	issuer *oidcengine.Issuer
+}
+
+func (p *issuerConfigPatcher) GetTokenTTLs() httpapi.TokenTTLs {
+	cfg := p.issuer.GetTokenConfig()
+	atTTL := int(cfg.AccessTokenTTL.Seconds())
+	idTTL := int(cfg.IDTokenTTL.Seconds())
+	rtTTL := int(cfg.RefreshTokenTTL.Seconds())
+	return httpapi.TokenTTLs{
+		AccessTokenTTL:  &atTTL,
+		IDTokenTTL:      &idTTL,
+		RefreshTokenTTL: &rtTTL,
+	}
+}
+
+func (p *issuerConfigPatcher) SetTokenTTLs(ttls httpapi.TokenTTLs) error {
+	cfg := p.issuer.GetTokenConfig()
+	if ttls.AccessTokenTTL != nil {
+		if *ttls.AccessTokenTTL <= 0 {
+			return fmt.Errorf("access_token_ttl must be > 0")
+		}
+		cfg.AccessTokenTTL = time.Duration(*ttls.AccessTokenTTL) * time.Second
+	}
+	if ttls.IDTokenTTL != nil {
+		if *ttls.IDTokenTTL <= 0 {
+			return fmt.Errorf("id_token_ttl must be > 0")
+		}
+		cfg.IDTokenTTL = time.Duration(*ttls.IDTokenTTL) * time.Second
+	}
+	if ttls.RefreshTokenTTL != nil {
+		if *ttls.RefreshTokenTTL <= 0 {
+			return fmt.Errorf("refresh_token_ttl must be > 0")
+		}
+		cfg.RefreshTokenTTL = time.Duration(*ttls.RefreshTokenTTL) * time.Second
+	}
+	p.issuer.SetTokenConfig(cfg)
+	return nil
 }
 
 // issuerMinter adapts oidcengine.Issuer to the httpapi.TokenMinter interface.

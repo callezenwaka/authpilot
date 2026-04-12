@@ -32,6 +32,20 @@ type TokenMinter interface {
 	MintForUser(user domain.User, clientID string, scopes []string, expiresIn int) (MintedTokens, error)
 }
 
+// TokenTTLs holds the mutable token lifetime settings for PATCH /api/v1/config.
+type TokenTTLs struct {
+	AccessTokenTTL  *int `json:"access_token_ttl"`  // seconds
+	IDTokenTTL      *int `json:"id_token_ttl"`       // seconds
+	RefreshTokenTTL *int `json:"refresh_token_ttl"`  // seconds
+}
+
+// ConfigPatcher applies runtime-safe configuration changes.
+// Implemented by an adapter in app.go that wraps oidc.Issuer.
+type ConfigPatcher interface {
+	GetTokenTTLs() TokenTTLs
+	SetTokenTTLs(TokenTTLs) error
+}
+
 type Dependencies struct {
 	Users           store.UserStore
 	Groups          store.GroupStore
@@ -43,8 +57,9 @@ type Dependencies struct {
 	SCIMKey         string       // separate credential for /scim/v2; falls back to APIKey when empty
 	BaseURL         string       // e.g. "http://localhost:8025" — used for magic link URLs
 	RateLimit       int          // requests per minute per IP; 0 = disabled
-	SCIMRouter      http.Handler // mounted at /scim/v2; nil = disabled
-	TokenMinter     TokenMinter  // nil = /tokens/mint endpoint returns 501
+	SCIMRouter      http.Handler  // mounted at /scim/v2; nil = disabled
+	TokenMinter     TokenMinter   // nil = /tokens/mint endpoint returns 501
+	ConfigPatcher   ConfigPatcher // nil = /config PATCH returns 501
 }
 
 func NewRouter(dep Dependencies) http.Handler {
@@ -102,6 +117,8 @@ func NewRouter(dep Dependencies) http.Handler {
 	api.HandleFunc("/notifications/all", listAllNotificationsHandler(dep.Flows, dep.Users, dep.BaseURL)).Methods(http.MethodGet)
 
 	api.HandleFunc("/tokens/mint", mintTokenHandler(dep.Users, dep.TokenMinter)).Methods(http.MethodPost)
+	api.HandleFunc("/config", getConfigHandler(dep.ConfigPatcher)).Methods(http.MethodGet)
+	api.HandleFunc("/config", patchConfigHandler(dep.ConfigPatcher)).Methods(http.MethodPatch)
 
 	api.HandleFunc("/export", exportHandler(dep.Users, dep.Groups)).Methods(http.MethodGet)
 
@@ -568,6 +585,64 @@ func loginMagicHandler(flows store.FlowStore, users store.UserStore) http.Handle
 			_, _ = users.Update(user)
 		}
 		http.Redirect(w, r, "/login/mfa?flow_id="+updated.ID, http.StatusFound)
+	}
+}
+
+func getConfigHandler(cp ConfigPatcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cp == nil {
+			writeAPIError(w, r, http.StatusNotImplemented, "NOT_IMPLEMENTED", "config management is not available", false)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"tokens": cp.GetTokenTTLs(),
+		})
+	}
+}
+
+// patchConfigRequest mirrors the subset of config that can be changed at runtime.
+// Restart-required fields (http_addr, protocol_addr, oidc.issuer_url, persistence)
+// are rejected with 400 restart_required: true if supplied.
+type patchConfigRequest struct {
+	Tokens            *TokenTTLs `json:"tokens"`
+	// Restart-required sentinel fields — presence alone triggers the guard.
+	HTTPAddr     *string `json:"http_addr"`
+	ProtocolAddr *string `json:"protocol_addr"`
+	IssuerURL    *string `json:"issuer_url"`
+}
+
+func patchConfigHandler(cp ConfigPatcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cp == nil {
+			writeAPIError(w, r, http.StatusNotImplemented, "NOT_IMPLEMENTED", "config management is not available", false)
+			return
+		}
+		var req patchConfigRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeAPIError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "invalid JSON body", false)
+			return
+		}
+		// Reject restart-required fields.
+		if req.HTTPAddr != nil || req.ProtocolAddr != nil || req.IssuerURL != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": map[string]any{
+					"code":             "RESTART_REQUIRED",
+					"message":          "one or more fields require a server restart to take effect",
+					"restart_required": true,
+					"docs_url":         "/admin/docs/errors#restart_required",
+				},
+			})
+			return
+		}
+		if req.Tokens != nil {
+			if err := cp.SetTokenTTLs(*req.Tokens); err != nil {
+				writeAPIError(w, r, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), false)
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"tokens": cp.GetTokenTTLs(),
+		})
 	}
 }
 

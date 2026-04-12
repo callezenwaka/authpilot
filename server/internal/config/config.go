@@ -12,6 +12,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SeedUser is a user definition used for startup pre-seeding.
+// Matches the domain.User JSON shape so the same YAML works for both.
+type SeedUser struct {
+	ID          string         `yaml:"id"`
+	Email       string         `yaml:"email"`
+	DisplayName string         `yaml:"display_name"`
+	Groups      []string       `yaml:"groups"`
+	MFAMethod   string         `yaml:"mfa_method"`
+	NextFlow    string         `yaml:"next_flow"`
+	Active      *bool          `yaml:"active"` // nil = default true
+	Claims      map[string]any `yaml:"claims"`
+	PhoneNumber string         `yaml:"phone_number"`
+}
+
 type Config struct {
 	HTTPAddr     string            `yaml:"http_addr"`
 	ProtocolAddr string            `yaml:"protocol_addr"`
@@ -23,6 +37,7 @@ type Config struct {
 	APIKey       string            `yaml:"api_key"`       // empty = local dev mode (no auth)
 	SCIMKey      string            `yaml:"scim_key"`      // separate credential for /scim/v2; falls back to APIKey when empty
 	RateLimit    int               `yaml:"rate_limit"`    // requests/min per IP on /api/v1; 0 = disabled
+	SeedUsers    []SeedUser        `yaml:"seed_users"`    // users created at startup; idempotent
 }
 
 type SAMLConfig struct {
@@ -120,6 +135,7 @@ type yamlConfig struct {
 	Persistence  yamlPersistence      `yaml:"persistence"`
 	Cleanup      yamlCleanupDurations `yaml:"cleanup"`
 	OIDC         yamlOIDC             `yaml:"oidc"`
+	SeedUsers    []SeedUser           `yaml:"seed_users"`
 }
 
 type yamlOIDC struct {
@@ -214,6 +230,9 @@ func mergeYAML(cfg *Config, from yamlConfig) error {
 		}
 		cfg.OIDC.RefreshTokenTTL = d
 	}
+	if len(from.SeedUsers) > 0 {
+		cfg.SeedUsers = append(cfg.SeedUsers, from.SeedUsers...)
+	}
 	return nil
 }
 
@@ -279,6 +298,13 @@ func applyEnv(cfg *Config) error {
 	}
 	if v := strings.TrimSpace(os.Getenv("AUTHPILOT_SAML_CERT_DIR")); v != "" {
 		cfg.SAML.CertDir = v
+	}
+	if v := strings.TrimSpace(os.Getenv("AUTHPILOT_SEED_USERS")); v != "" {
+		var users []SeedUser
+		if err := yaml.Unmarshal([]byte(v), &users); err != nil {
+			return fmt.Errorf("AUTHPILOT_SEED_USERS: %w", err)
+		}
+		cfg.SeedUsers = append(cfg.SeedUsers, users...)
 	}
 
 	return nil

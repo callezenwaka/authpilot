@@ -59,6 +59,41 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
+func TestSeedUsers_ParsedFromEnv(t *testing.T) {
+	yaml := `
+- id: usr_alice
+  email: alice@example.com
+  display_name: Alice
+  mfa_method: totp
+- id: usr_bob
+  email: bob@example.com
+`
+	t.Setenv("AUTHPILOT_SEED_USERS", yaml)
+
+	cfg, err := Load("", RuntimeOverrides{})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(cfg.SeedUsers) != 2 {
+		t.Fatalf("expected 2 seed users, got %d", len(cfg.SeedUsers))
+	}
+	if cfg.SeedUsers[0].ID != "usr_alice" {
+		t.Errorf("first seed user ID: want usr_alice, got %q", cfg.SeedUsers[0].ID)
+	}
+	if cfg.SeedUsers[1].Email != "bob@example.com" {
+		t.Errorf("second seed user email: want bob@example.com, got %q", cfg.SeedUsers[1].Email)
+	}
+}
+
+func TestSeedUsers_InvalidYAML_ReturnsError(t *testing.T) {
+	t.Setenv("AUTHPILOT_SEED_USERS", "}{not yaml}{")
+
+	_, err := Load("", RuntimeOverrides{})
+	if err == nil {
+		t.Fatal("expected error for invalid AUTHPILOT_SEED_USERS YAML")
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

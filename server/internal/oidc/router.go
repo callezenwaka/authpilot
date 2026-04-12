@@ -276,7 +276,7 @@ func handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps)
 		expiredIssuer := NewIssuer(dep.KeyMgr, TokenConfig{
 			AccessTokenTTL:  -1 * time.Second,
 			IDTokenTTL:      -1 * time.Second,
-			RefreshTokenTTL: dep.Issuer.cfg.RefreshTokenTTL,
+			RefreshTokenTTL: dep.Issuer.tokenConfig().RefreshTokenTTL,
 		}, dep.Issuer.issuer)
 		issuer = expiredIssuer
 	}
@@ -301,7 +301,7 @@ func handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps)
 		ClientID:     matched.ClientID,
 		RefreshToken: tokens.RefreshToken,
 		CreatedAt:    now,
-		ExpiresAt:    now.Add(dep.Issuer.cfg.RefreshTokenTTL),
+		ExpiresAt:    now.Add(dep.Issuer.tokenConfig().RefreshTokenTTL),
 		Events: []domain.SessionEvent{
 			{Timestamp: now, Type: "token_issued"},
 		},
@@ -350,7 +350,7 @@ func handleRefreshGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps) 
 
 	// Rotate: replace the old refresh token on the session.
 	session.RefreshToken = tokens.RefreshToken
-	session.ExpiresAt = time.Now().UTC().Add(dep.Issuer.cfg.RefreshTokenTTL)
+	session.ExpiresAt = time.Now().UTC().Add(dep.Issuer.tokenConfig().RefreshTokenTTL)
 	session.Events = append(session.Events, domain.SessionEvent{
 		Timestamp: time.Now().UTC(),
 		Type:      "refreshed",
