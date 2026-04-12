@@ -99,7 +99,7 @@ func NewRouter(dep Dependencies) http.Handler {
 
 func openAPISpecHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(openAPISpec))
+	_, _ = w.Write(cachedSpec)
 }
 
 func openAPIDocsHandler(w http.ResponseWriter, _ *http.Request) {
