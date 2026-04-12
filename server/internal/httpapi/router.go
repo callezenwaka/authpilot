@@ -578,13 +578,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // writeAPIError writes the standard spec error envelope.
-func writeAPIError(w http.ResponseWriter, r *http.Request, status int, code, message string, retryable bool) {
+// An optional details map[string]any may be passed as the last argument.
+func writeAPIError(w http.ResponseWriter, r *http.Request, status int, code, message string, retryable bool, details ...map[string]any) {
+	errObj := map[string]any{
+		"code":      code,
+		"message":   message,
+		"retryable": retryable,
+		"docs_url":  "/admin/docs/errors#" + strings.ToLower(code),
+	}
+	if len(details) > 0 && details[0] != nil {
+		errObj["details"] = details[0]
+	}
 	body := map[string]any{
-		"error": map[string]any{
-			"code":      code,
-			"message":   message,
-			"retryable": retryable,
-		},
+		"error":      errObj,
 		"request_id": getRequestID(r),
 	}
 	writeJSON(w, status, body)
@@ -592,12 +598,17 @@ func writeAPIError(w http.ResponseWriter, r *http.Request, status int, code, mes
 
 // writeError is kept for internal callers that don't have an *http.Request handy
 // (login page handlers). It omits request_id.
-func writeError(w http.ResponseWriter, status int, code string, message string) {
+func writeError(w http.ResponseWriter, status int, code string, message string, details ...map[string]any) {
+	errObj := map[string]any{
+		"code":      code,
+		"message":   message,
+		"retryable": false,
+		"docs_url":  "/admin/docs/errors#" + strings.ToLower(code),
+	}
+	if len(details) > 0 && details[0] != nil {
+		errObj["details"] = details[0]
+	}
 	writeJSON(w, status, map[string]any{
-		"error": map[string]any{
-			"code":      code,
-			"message":   message,
-			"retryable": false,
-		},
+		"error": errObj,
 	})
 }

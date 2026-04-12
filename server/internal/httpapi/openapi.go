@@ -133,6 +133,8 @@ func components() map[string]any {
 							"code":      map[string]any{"type": "string"},
 							"message":   map[string]any{"type": "string"},
 							"retryable": map[string]any{"type": "boolean"},
+							"docs_url":  map[string]any{"type": "string", "description": "Link to documentation for this error code."},
+							"details":   map[string]any{"type": "object", "additionalProperties": true, "description": "Structured context about the error (e.g. which field failed, which resource was not found)."},
 						},
 					},
 					"request_id": map[string]any{"type": "string"},

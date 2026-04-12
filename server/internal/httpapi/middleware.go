@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +78,17 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	return rl
 }
 
+type allowResult struct {
+	allowed   bool
+	remaining int
+	resetAt   time.Time // when the next token will be available
+}
+
 func (rl *RateLimiter) allow(ip string) bool {
+	return rl.allowWithInfo(ip).allowed
+}
+
+func (rl *RateLimiter) allowWithInfo(ip string) allowResult {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -84,7 +96,7 @@ func (rl *RateLimiter) allow(ip string) bool {
 	b, ok := rl.buckets[ip]
 	if !ok {
 		rl.buckets[ip] = &bucket{tokens: rl.limit - 1, lastSeen: now}
-		return true
+		return allowResult{allowed: true, remaining: rl.limit - 1, resetAt: now.Add(rl.refill)}
 	}
 
 	// Refill tokens based on elapsed time.
@@ -99,10 +111,12 @@ func (rl *RateLimiter) allow(ip string) bool {
 	}
 
 	if b.tokens <= 0 {
-		return false
+		// Reset = when one full refill interval has elapsed since lastSeen.
+		resetAt := b.lastSeen.Add(rl.refill)
+		return allowResult{allowed: false, remaining: 0, resetAt: resetAt}
 	}
 	b.tokens--
-	return true
+	return allowResult{allowed: true, remaining: b.tokens, resetAt: now.Add(rl.refill)}
 }
 
 func (rl *RateLimiter) evict() {
@@ -118,11 +132,23 @@ func (rl *RateLimiter) evict() {
 
 // rateLimitMiddleware returns a middleware that enforces the given RateLimiter.
 // Uses X-Forwarded-For if present, otherwise RemoteAddr.
+// All responses include X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset.
+// 429 responses additionally include Retry-After.
 func rateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := clientIP(r)
-			if !rl.allow(ip) {
+			res := rl.allowWithInfo(ip)
+			resetUnix := res.resetAt.Unix()
+			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
+			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(res.remaining))
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetUnix, 10))
+			if !res.allowed {
+				retryAfter := res.resetAt.Unix() - time.Now().Unix()
+				if retryAfter < 1 {
+					retryAfter = 1
+				}
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
 				writeAPIError(w, r, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests, slow down", true)
 				return
 			}

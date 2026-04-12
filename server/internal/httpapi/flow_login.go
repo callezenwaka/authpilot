@@ -176,7 +176,7 @@ func getFlowHandler(flows store.FlowStore) http.HandlerFunc {
 		flow, err := getAndAutoAdvanceFlow(flows, flowID)
 		if err != nil {
 			if err == store.ErrNotFound {
-				writeError(w, http.StatusNotFound, "not_found", "flow not found")
+				writeError(w, http.StatusNotFound, "not_found", "flow not found", map[string]any{"flow_id": flowID})
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "get_flow_failed", err.Error())

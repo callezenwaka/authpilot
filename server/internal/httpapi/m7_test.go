@@ -198,6 +198,58 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_HeadersOn429(t *testing.T) {
+	rl := NewRateLimiter(1, time.Minute)
+	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	makeReq := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+		req.RemoteAddr = "6.6.6.6:1234"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	makeReq() // exhaust the one token
+
+	rec := makeReq() // this one is rate-limited
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+	for _, hdr := range []string{"Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"} {
+		if rec.Header().Get(hdr) == "" {
+			t.Errorf("missing header %q on 429 response", hdr)
+		}
+	}
+	if rec.Header().Get("X-RateLimit-Remaining") != "0" {
+		t.Errorf("X-RateLimit-Remaining want 0, got %q", rec.Header().Get("X-RateLimit-Remaining"))
+	}
+}
+
+func TestRateLimitMiddleware_HeadersOnAllowedRequest(t *testing.T) {
+	rl := NewRateLimiter(10, time.Minute)
+	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+	req.RemoteAddr = "7.7.7.7:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if rec.Header().Get("X-RateLimit-Limit") != "10" {
+		t.Errorf("X-RateLimit-Limit want 10, got %q", rec.Header().Get("X-RateLimit-Limit"))
+	}
+	if rec.Header().Get("X-RateLimit-Reset") == "" {
+		t.Error("X-RateLimit-Reset should be present on allowed request")
+	}
+}
+
 // --- Idempotency ---
 
 func TestIdempotencyMiddleware_CachesResponse(t *testing.T) {
