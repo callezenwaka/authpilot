@@ -18,13 +18,14 @@ import (
 
 // RouterDeps groups everything the OIDC router needs.
 type RouterDeps struct {
-	Flows     store.FlowStore
-	Users     store.UserStore
-	Sessions  store.SessionStore
-	KeyMgr    *KeyManager
-	Issuer    *Issuer
-	IssuerURL string // e.g. "http://localhost:8026"
-	LoginURL  string // e.g. "http://localhost:8025/login"
+	Flows              store.FlowStore
+	Users              store.UserStore
+	Sessions           store.SessionStore
+	KeyMgr             *KeyManager
+	Issuer             *Issuer
+	IssuerURL          string // e.g. "http://localhost:8026"
+	LoginURL           string // e.g. "http://localhost:8025/login"
+	HeaderPropagation  bool   // inject X-User-* headers on /userinfo responses
 }
 
 func NewRouter(dep RouterDeps) http.Handler {
@@ -402,6 +403,12 @@ func userinfoHandler(dep RouterDeps) http.HandlerFunc {
 			if _, exists := claims[k]; !exists {
 				claims[k] = v
 			}
+		}
+
+		if dep.HeaderPropagation {
+			w.Header().Set("X-User-ID", user.ID)
+			w.Header().Set("X-User-Email", user.Email)
+			w.Header().Set("X-User-Groups", strings.Join(user.Groups, ","))
 		}
 
 		writeJSON(w, http.StatusOK, claims)

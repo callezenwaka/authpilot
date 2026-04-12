@@ -34,10 +34,11 @@ type Config struct {
 	Cleanup      CleanupConfig     `yaml:"cleanup"`
 	OIDC         OIDCConfig        `yaml:"oidc"`
 	SAML         SAMLConfig        `yaml:"saml"`
-	APIKey       string            `yaml:"api_key"`       // empty = local dev mode (no auth)
-	SCIMKey      string            `yaml:"scim_key"`      // separate credential for /scim/v2; falls back to APIKey when empty
-	RateLimit    int               `yaml:"rate_limit"`    // requests/min per IP on /api/v1; 0 = disabled
-	SeedUsers    []SeedUser        `yaml:"seed_users"`    // users created at startup; idempotent
+	APIKey              string            `yaml:"api_key"`              // empty = local dev mode (no auth)
+	SCIMKey             string            `yaml:"scim_key"`             // separate credential for /scim/v2; falls back to APIKey when empty
+	RateLimit           int               `yaml:"rate_limit"`           // requests/min per IP on /api/v1; 0 = disabled
+	SeedUsers           []SeedUser        `yaml:"seed_users"`           // users created at startup; idempotent
+	HeaderPropagation   bool              `yaml:"header_propagation"`   // inject X-User-* headers on /userinfo responses
 }
 
 type SAMLConfig struct {
@@ -298,6 +299,13 @@ func applyEnv(cfg *Config) error {
 	}
 	if v := strings.TrimSpace(os.Getenv("AUTHPILOT_SAML_CERT_DIR")); v != "" {
 		cfg.SAML.CertDir = v
+	}
+	if v := strings.TrimSpace(os.Getenv("AUTHPILOT_HEADER_PROPAGATION")); v != "" {
+		b, err := ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("AUTHPILOT_HEADER_PROPAGATION: %w", err)
+		}
+		cfg.HeaderPropagation = b
 	}
 	if v := strings.TrimSpace(os.Getenv("AUTHPILOT_SEED_USERS")); v != "" {
 		var users []SeedUser

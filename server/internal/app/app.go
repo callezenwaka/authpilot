@@ -99,13 +99,14 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	loginURL := "http://localhost" + cfg.HTTPAddr + "/login"
 	oidcRouter := oidcengine.NewRouter(oidcengine.RouterDeps{
-		Flows:     flows,
-		Users:     users,
-		Sessions:  sessions,
-		KeyMgr:    km,
-		Issuer:    issuer,
-		IssuerURL: cfg.OIDC.IssuerURL,
-		LoginURL:  loginURL,
+		Flows:             flows,
+		Users:             users,
+		Sessions:          sessions,
+		KeyMgr:            km,
+		Issuer:            issuer,
+		IssuerURL:         cfg.OIDC.IssuerURL,
+		LoginURL:          loginURL,
+		HeaderPropagation: cfg.HeaderPropagation,
 	})
 
 	samlCertMgr, err := samlengine.NewCertManagerFromPath(cfg.SAML.CertDir)
@@ -178,6 +179,7 @@ func (a *App) Start(ctx context.Context) error {
 		"access_token_ttl", a.cfg.OIDC.AccessTokenTTL,
 		"id_token_ttl", a.cfg.OIDC.IDTokenTTL,
 		"refresh_token_ttl", a.cfg.OIDC.RefreshTokenTTL,
+		"header_propagation", a.cfg.HeaderPropagation,
 	)
 	a.startCleanupScheduler(ctx)
 
