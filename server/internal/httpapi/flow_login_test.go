@@ -161,8 +161,8 @@ func TestM2_InvalidTransitionsReturnConflict(t *testing.T) {
 	if verifyBeforePick.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d body=%s", verifyBeforePick.Code, verifyBeforePick.Body.String())
 	}
-	if !strings.Contains(verifyBeforePick.Body.String(), "state_transition_invalid") {
-		t.Fatalf("expected state_transition_invalid error, got %s", verifyBeforePick.Body.String())
+	if !strings.Contains(verifyBeforePick.Body.String(), "STATE_TRANSITION_INVALID") {
+		t.Fatalf("expected STATE_TRANSITION_INVALID error, got %s", verifyBeforePick.Body.String())
 	}
 
 	expectedMismatch := doJSON(t, router, http.MethodPost, "/api/v1/flows/flow_invalid/select-user", map[string]string{
@@ -172,8 +172,8 @@ func TestM2_InvalidTransitionsReturnConflict(t *testing.T) {
 	if expectedMismatch.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d body=%s", expectedMismatch.Code, expectedMismatch.Body.String())
 	}
-	if !strings.Contains(expectedMismatch.Body.String(), "state_transition_invalid") {
-		t.Fatalf("expected state_transition_invalid error, got %s", expectedMismatch.Body.String())
+	if !strings.Contains(expectedMismatch.Body.String(), "STATE_TRANSITION_INVALID") {
+		t.Fatalf("expected STATE_TRANSITION_INVALID error, got %s", expectedMismatch.Body.String())
 	}
 }
 

@@ -223,7 +223,12 @@ func verifyMFAFlowHandler(flows store.FlowStore, users store.UserStore) http.Han
 func approveFlowHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
-		flow, status, code, msg := approveOrDenyFlow(flows, users, flowID, true)
+		req, err := decodeFlowMutationRequest(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+			return
+		}
+		flow, status, code, msg := approveOrDenyFlow(flows, users, flowID, true, req.ExpectedState)
 		if status != 0 {
 			writeError(w, status, code, msg)
 			return
@@ -235,7 +240,12 @@ func approveFlowHandler(flows store.FlowStore, users store.UserStore) http.Handl
 func denyFlowHandler(flows store.FlowStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
-		flow, status, code, msg := approveOrDenyFlow(flows, nil, flowID, false)
+		req, err := decodeFlowMutationRequest(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json", err.Error())
+			return
+		}
+		flow, status, code, msg := approveOrDenyFlow(flows, nil, flowID, false, req.ExpectedState)
 		if status != 0 {
 			writeError(w, status, code, msg)
 			return
@@ -387,10 +397,10 @@ func applySelectUser(flows store.FlowStore, users store.UserStore, flowID, userI
 		return domain.Flow{}, http.StatusNotFound, "not_found", "flow not found"
 	}
 	if expectedState != "" && flow.State != expectedState {
-		return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "current state does not match expected_state"
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "current state does not match expected_state"
 	}
 	if !flowengine.CanTransition(flowengine.State(flow.State), flowengine.StateUserPicked) {
-		return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "invalid flow transition"
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 	}
 
 	user, err := users.GetByID(userID)
@@ -406,7 +416,7 @@ func applySelectUser(flows store.FlowStore, users store.UserStore, flowID, userI
 	scenario := flowengine.NormalizeScenario(flow.Scenario)
 	if scenario == flowengine.ScenarioAccountLocked {
 		if !flowengine.CanTransition(flowengine.State(flow.State), flowengine.StateError) {
-			return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "invalid flow transition"
+			return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 		}
 		flow.State = string(flowengine.StateError)
 		flow.Error = "account locked"
@@ -419,7 +429,7 @@ func applySelectUser(flows store.FlowStore, users store.UserStore, flowID, userI
 
 	if flowengine.RequiresMFA(user.MFAMethod) {
 		if !flowengine.CanTransition(flowengine.State(flow.State), flowengine.StateMFAPending) {
-			return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "invalid flow transition"
+			return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 		}
 		flow.State = string(flowengine.StateMFAPending)
 		updated, err := flows.Update(flow)
@@ -430,7 +440,7 @@ func applySelectUser(flows store.FlowStore, users store.UserStore, flowID, userI
 	}
 
 	if !flowengine.CanTransition(flowengine.State(flow.State), flowengine.StateComplete) {
-		return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "invalid flow transition"
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 	}
 	flow.State = string(flowengine.StateComplete)
 	if scenario != flowengine.ScenarioNormal {
@@ -453,10 +463,10 @@ func applyVerifyMFA(flows store.FlowStore, users store.UserStore, flowID, code, 
 		return domain.Flow{}, http.StatusNotFound, "not_found", "flow not found"
 	}
 	if expectedState != "" && flow.State != expectedState {
-		return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "current state does not match expected_state"
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "current state does not match expected_state"
 	}
 	if flow.State != string(flowengine.StateMFAPending) {
-		return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "flow is not awaiting MFA"
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "flow is not awaiting MFA"
 	}
 
 	flow.Attempts++
@@ -474,7 +484,7 @@ func applyVerifyMFA(flows store.FlowStore, users store.UserStore, flowID, code, 
 		return domain.Flow{}, http.StatusBadRequest, "validation_error", "code is required"
 	}
 	if !flowengine.CanTransition(flowengine.State(flow.State), flowengine.StateMFAApproved) {
-		return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "invalid flow transition"
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 	}
 	flow.State = string(flowengine.StateMFAApproved)
 	updated, err := flows.Update(flow)
@@ -488,13 +498,16 @@ func applyVerifyMFA(flows store.FlowStore, users store.UserStore, flowID, code, 
 	return updated, 0, "", ""
 }
 
-func approveOrDenyFlow(flows store.FlowStore, users store.UserStore, flowID string, approve bool) (domain.Flow, int, string, string) {
+func approveOrDenyFlow(flows store.FlowStore, users store.UserStore, flowID string, approve bool, expectedState string) (domain.Flow, int, string, string) {
 	flow, err := flows.GetByID(flowID)
 	if err != nil {
 		return domain.Flow{}, http.StatusNotFound, "not_found", "flow not found"
 	}
+	if expectedState != "" && flow.State != expectedState {
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "current state does not match expected_state"
+	}
 	if flow.State != string(flowengine.StateMFAPending) {
-		return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "flow is not awaiting MFA"
+		return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "flow is not awaiting MFA"
 	}
 
 	if approve {
@@ -502,12 +515,12 @@ func approveOrDenyFlow(flows store.FlowStore, users store.UserStore, flowID stri
 			return flow, http.StatusAccepted, "mfa_pending", "waiting for slow_mfa delay"
 		}
 		if !flowengine.CanTransition(flowengine.State(flow.State), flowengine.StateMFAApproved) {
-			return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "invalid flow transition"
+			return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 		}
 		flow.State = string(flowengine.StateMFAApproved)
 	} else {
 		if !flowengine.CanTransition(flowengine.State(flow.State), flowengine.StateMFADenied) {
-			return domain.Flow{}, http.StatusConflict, "state_transition_invalid", "invalid flow transition"
+			return domain.Flow{}, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition"
 		}
 		flow.State = string(flowengine.StateMFADenied)
 	}
