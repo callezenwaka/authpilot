@@ -395,6 +395,178 @@ const openAPISpec = `{
         }
       }
     },
+    "/scim/v2/ServiceProviderConfig": {
+      "get": {
+        "summary": "SCIM server capabilities",
+        "operationId": "scimServiceProviderConfig",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "200": { "description": "ServiceProviderConfig document" }
+        }
+      }
+    },
+    "/scim/v2/Schemas": {
+      "get": {
+        "summary": "List SCIM schemas",
+        "operationId": "scimSchemas",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "200": { "description": "SCIM ListResponse of schemas" }
+        }
+      }
+    },
+    "/scim/v2/Schemas/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Schema URN" } ],
+      "get": {
+        "summary": "Get SCIM schema by URN",
+        "operationId": "scimSchemaByID",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "200": { "description": "Schema definition" },
+          "404": { "description": "Schema not found" }
+        }
+      }
+    },
+    "/scim/v2/Users": {
+      "get": {
+        "summary": "List SCIM users",
+        "operationId": "scimListUsers",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "parameters": [
+          { "name": "filter", "in": "query", "required": false, "schema": { "type": "string" }, "description": "SCIM filter expression, e.g. userName eq \"alice@example.com\"" }
+        ],
+        "responses": {
+          "200": { "description": "SCIM ListResponse of users" }
+        }
+      },
+      "post": {
+        "summary": "Create SCIM user",
+        "operationId": "scimCreateUser",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "requestBody": { "required": true, "content": { "application/scim+json": { "schema": { "type": "object", "required": ["userName"], "properties": { "userName": { "type": "string" }, "displayName": { "type": "string" }, "emails": { "type": "array", "items": { "type": "object" } }, "phoneNumbers": { "type": "array", "items": { "type": "object" } } } } } } },
+        "responses": {
+          "201": { "description": "Created SCIM user" },
+          "400": { "description": "userName is required" }
+        }
+      }
+    },
+    "/scim/v2/Users/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+      "get": {
+        "summary": "Get SCIM user",
+        "operationId": "scimGetUser",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "200": { "description": "SCIM user" },
+          "404": { "description": "User not found" }
+        }
+      },
+      "put": {
+        "summary": "Replace SCIM user",
+        "operationId": "scimReplaceUser",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "requestBody": { "required": true, "content": { "application/scim+json": { "schema": { "type": "object" } } } },
+        "responses": {
+          "200": { "description": "Updated SCIM user" },
+          "404": { "description": "User not found" }
+        }
+      },
+      "patch": {
+        "summary": "Patch SCIM user",
+        "operationId": "scimPatchUser",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "requestBody": { "required": true, "content": { "application/scim+json": { "schema": { "type": "object", "properties": { "schemas": { "type": "array", "items": { "type": "string" } }, "Operations": { "type": "array", "items": { "type": "object" } } } } } } },
+        "responses": {
+          "200": { "description": "Patched SCIM user" },
+          "404": { "description": "User not found" }
+        }
+      },
+      "delete": {
+        "summary": "Delete SCIM user",
+        "operationId": "scimDeleteUser",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "description": "User not found" }
+        }
+      }
+    },
+    "/scim/v2/Groups": {
+      "get": {
+        "summary": "List SCIM groups",
+        "operationId": "scimListGroups",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "200": { "description": "SCIM ListResponse of groups" }
+        }
+      },
+      "post": {
+        "summary": "Create SCIM group",
+        "operationId": "scimCreateGroup",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "requestBody": { "required": true, "content": { "application/scim+json": { "schema": { "type": "object", "required": ["displayName"], "properties": { "displayName": { "type": "string" }, "members": { "type": "array", "items": { "type": "object" } } } } } } },
+        "responses": {
+          "201": { "description": "Created SCIM group" },
+          "400": { "description": "displayName is required" }
+        }
+      }
+    },
+    "/scim/v2/Groups/{id}": {
+      "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+      "get": {
+        "summary": "Get SCIM group",
+        "operationId": "scimGetGroup",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "200": { "description": "SCIM group with member refs" },
+          "404": { "description": "Group not found" }
+        }
+      },
+      "put": {
+        "summary": "Replace SCIM group",
+        "operationId": "scimReplaceGroup",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "requestBody": { "required": true, "content": { "application/scim+json": { "schema": { "type": "object" } } } },
+        "responses": {
+          "200": { "description": "Updated SCIM group" },
+          "404": { "description": "Group not found" }
+        }
+      },
+      "patch": {
+        "summary": "Patch SCIM group",
+        "operationId": "scimPatchGroup",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "requestBody": { "required": true, "content": { "application/scim+json": { "schema": { "type": "object" } } } },
+        "responses": {
+          "200": { "description": "Patched SCIM group" },
+          "404": { "description": "Group not found" }
+        }
+      },
+      "delete": {
+        "summary": "Delete SCIM group",
+        "operationId": "scimDeleteGroup",
+        "tags": ["SCIM"],
+        "security": [{"ApiKey":[]},{"BearerToken":[]}],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "description": "Group not found" }
+        }
+      }
+    },
     "/api/v1/openapi.json": {
       "get": {
         "summary": "OpenAPI specification",
