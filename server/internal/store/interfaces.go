@@ -43,3 +43,22 @@ type SessionStore interface {
 	Delete(id string) error
 	DeleteExpired(now time.Time) (int, error)
 }
+
+// AuditStore is a write-mostly append log for security-relevant events.
+// Implementations may cap the log size (ring buffer); oldest entries are
+// evicted first when the cap is reached.
+type AuditStore interface {
+	// Append records an event. Never returns an error to the caller —
+	// audit failures must not block the primary operation.
+	Append(event domain.AuditEvent)
+	// List returns all stored events. If filter.EventType is non-empty only
+	// events with that type are returned. If filter.Since is non-zero only
+	// events with Timestamp >= Since are returned.
+	List(filter AuditFilter) []domain.AuditEvent
+}
+
+// AuditFilter controls which events List returns.
+type AuditFilter struct {
+	EventType string    // empty = all
+	Since     time.Time // zero = all
+}

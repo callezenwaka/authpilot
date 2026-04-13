@@ -2,6 +2,16 @@ package domain
 
 import "time"
 
+// AuditEvent records a single security-relevant action in the system.
+type AuditEvent struct {
+	ID         string         `json:"id"`
+	Timestamp  time.Time      `json:"timestamp"`
+	EventType  string         `json:"event_type"`  // e.g. "user.created", "flow.complete"
+	Actor      string         `json:"actor"`        // user ID or "system"
+	ResourceID string         `json:"resource_id"`  // ID of the affected resource
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
 type User struct {
 	ID          string         `json:"id"`
 	Email       string         `json:"email"`

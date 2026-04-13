@@ -20,6 +20,9 @@ import (
 	wsfedengine "authpilot/server/internal/wsfed"
 )
 
+// auditCap is the maximum number of audit events held in memory.
+const auditCap = 10_000
+
 type App struct {
 	cfg    config.Config
 	logger *slog.Logger
@@ -55,6 +58,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	flows := memory.NewFlowStore()
 	sessions := memory.NewSessionStore()
+	auditStore := memory.NewAuditStore(auditCap)
 
 	if err := seedUsers(users, cfg.SeedUsers); err != nil {
 		return nil, fmt.Errorf("seed users: %w", err)
@@ -82,6 +86,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		Groups:        groups,
 		Flows:         flows,
 		Sessions:      sessions,
+		Audit:         auditStore,
 		APIKey:        cfg.APIKey,
 		SCIMKey:       cfg.SCIMKey,
 		BaseURL:       httpBaseURL,

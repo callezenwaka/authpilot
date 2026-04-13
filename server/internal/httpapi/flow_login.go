@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"authpilot/server/internal/audit"
 	"authpilot/server/internal/domain"
 	flowengine "authpilot/server/internal/flow"
 	"authpilot/server/internal/store"
@@ -193,7 +194,7 @@ func getFlowHandler(flows store.FlowStore) http.HandlerFunc {
 	}
 }
 
-func selectUserFlowHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func selectUserFlowHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		req, err := decodeFlowMutationRequest(r)
@@ -206,11 +207,12 @@ func selectUserFlowHandler(flows store.FlowStore, users store.UserStore) http.Ha
 			writeError(w, status, code, msg)
 			return
 		}
+		emitFlowStateAudit(as, updated)
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
 
-func verifyMFAFlowHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func verifyMFAFlowHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		req, err := decodeFlowMutationRequest(r)
@@ -223,11 +225,12 @@ func verifyMFAFlowHandler(flows store.FlowStore, users store.UserStore) http.Han
 			writeError(w, status, code, msg)
 			return
 		}
+		emitFlowStateAudit(as, updated)
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
 
-func approveFlowHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func approveFlowHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		req, err := decodeFlowMutationRequest(r)
@@ -240,11 +243,12 @@ func approveFlowHandler(flows store.FlowStore, users store.UserStore) http.Handl
 			writeError(w, status, code, msg)
 			return
 		}
+		emitFlowStateAudit(as, flow)
 		writeJSON(w, http.StatusOK, flow)
 	}
 }
 
-func denyFlowHandler(flows store.FlowStore) http.HandlerFunc {
+func denyFlowHandler(flows store.FlowStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		req, err := decodeFlowMutationRequest(r)
@@ -257,6 +261,7 @@ func denyFlowHandler(flows store.FlowStore) http.HandlerFunc {
 			writeError(w, status, code, msg)
 			return
 		}
+		emitFlowStateAudit(as, flow)
 		writeJSON(w, http.StatusOK, flow)
 	}
 }
@@ -511,7 +516,7 @@ func applyVerifyMFA(flows store.FlowStore, users store.UserStore, flowID, code, 
 	return updated, 0, "", ""
 }
 
-func webauthnResponseHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func webauthnResponseHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		flow, err := flows.GetByID(flowID)
@@ -539,6 +544,10 @@ func webauthnResponseHandler(flows store.FlowStore, users store.UserStore) http.
 				_, _ = users.Update(user)
 			}
 		}
+		audit.Emit(as, audit.EventFlowComplete, updated.UserID, updated.ID, map[string]any{
+			"protocol": updated.Protocol,
+			"method":   "webauthn",
+		})
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
@@ -612,6 +621,25 @@ func getAndAutoAdvanceFlow(flows store.FlowStore, flowID string) (domain.Flow, e
 		}
 	}
 	return flow, nil
+}
+
+// emitFlowStateAudit fires an audit event for terminal and key flow states.
+func emitFlowStateAudit(as store.AuditStore, flow domain.Flow) {
+	var eventType string
+	switch flowengine.State(flow.State) {
+	case flowengine.StateComplete:
+		eventType = audit.EventFlowComplete
+	case flowengine.StateMFADenied:
+		eventType = audit.EventFlowDenied
+	case flowengine.StateError:
+		eventType = audit.EventFlowError
+	default:
+		return
+	}
+	audit.Emit(as, eventType, flow.UserID, flow.ID, map[string]any{
+		"protocol": flow.Protocol,
+		"scenario": flow.Scenario,
+	})
 }
 
 func moveToComplete(flows store.FlowStore, flow domain.Flow) (domain.Flow, bool) {

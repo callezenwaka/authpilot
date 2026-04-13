@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"authpilot/server/internal/audit"
 	"authpilot/server/internal/domain"
 	"authpilot/server/internal/export"
 	"authpilot/server/internal/notify"
@@ -51,6 +52,7 @@ type Dependencies struct {
 	Groups          store.GroupStore
 	Flows           store.FlowStore
 	Sessions        store.SessionStore
+	Audit           store.AuditStore  // nil = audit disabled
 	AdminStaticDir  string
 	NotifyStaticDir string
 	APIKey          string       // empty = local dev mode (no auth required)
@@ -93,10 +95,10 @@ func NewRouter(dep Dependencies) http.Handler {
 	api.HandleFunc("/docs", openAPIDocsHandler).Methods(http.MethodGet)
 
 	api.HandleFunc("/users", listUsersHandler(dep.Users)).Methods(http.MethodGet)
-	api.HandleFunc("/users", createUserHandler(dep.Users)).Methods(http.MethodPost)
+	api.HandleFunc("/users", createUserHandler(dep.Users, dep.Audit)).Methods(http.MethodPost)
 	api.HandleFunc("/users/{id}", getUserHandler(dep.Users)).Methods(http.MethodGet)
-	api.HandleFunc("/users/{id}", updateUserHandler(dep.Users)).Methods(http.MethodPut)
-	api.HandleFunc("/users/{id}", deleteUserHandler(dep.Users)).Methods(http.MethodDelete)
+	api.HandleFunc("/users/{id}", updateUserHandler(dep.Users, dep.Audit)).Methods(http.MethodPut)
+	api.HandleFunc("/users/{id}", deleteUserHandler(dep.Users, dep.Audit)).Methods(http.MethodDelete)
 
 	api.HandleFunc("/groups", listGroupsHandler(dep.Groups)).Methods(http.MethodGet)
 	api.HandleFunc("/groups", createGroupHandler(dep.Groups)).Methods(http.MethodPost)
@@ -107,11 +109,11 @@ func NewRouter(dep Dependencies) http.Handler {
 	api.HandleFunc("/flows", listFlowsHandler(dep.Flows)).Methods(http.MethodGet)
 	api.HandleFunc("/flows", createFlowHandler(dep.Flows)).Methods(http.MethodPost)
 	api.HandleFunc("/flows/{id}", getFlowHandler(dep.Flows)).Methods(http.MethodGet)
-	api.HandleFunc("/flows/{id}/select-user", selectUserFlowHandler(dep.Flows, dep.Users)).Methods(http.MethodPost)
-	api.HandleFunc("/flows/{id}/verify-mfa", verifyMFAFlowHandler(dep.Flows, dep.Users)).Methods(http.MethodPost)
-	api.HandleFunc("/flows/{id}/approve", approveFlowHandler(dep.Flows, dep.Users)).Methods(http.MethodPost)
-	api.HandleFunc("/flows/{id}/deny", denyFlowHandler(dep.Flows)).Methods(http.MethodPost)
-	api.HandleFunc("/flows/{id}/webauthn-response", webauthnResponseHandler(dep.Flows, dep.Users)).Methods(http.MethodPost)
+	api.HandleFunc("/flows/{id}/select-user", selectUserFlowHandler(dep.Flows, dep.Users, dep.Audit)).Methods(http.MethodPost)
+	api.HandleFunc("/flows/{id}/verify-mfa", verifyMFAFlowHandler(dep.Flows, dep.Users, dep.Audit)).Methods(http.MethodPost)
+	api.HandleFunc("/flows/{id}/approve", approveFlowHandler(dep.Flows, dep.Users, dep.Audit)).Methods(http.MethodPost)
+	api.HandleFunc("/flows/{id}/deny", denyFlowHandler(dep.Flows, dep.Audit)).Methods(http.MethodPost)
+	api.HandleFunc("/flows/{id}/webauthn-response", webauthnResponseHandler(dep.Flows, dep.Users, dep.Audit)).Methods(http.MethodPost)
 
 	api.HandleFunc("/sessions", listSessionsHandler(dep.Sessions)).Methods(http.MethodGet)
 	api.HandleFunc("/notifications", listNotificationsHandler(dep.Flows, dep.Users, dep.BaseURL)).Methods(http.MethodGet)
@@ -122,6 +124,9 @@ func NewRouter(dep Dependencies) http.Handler {
 	api.HandleFunc("/config", patchConfigHandler(dep.ConfigPatcher)).Methods(http.MethodPatch)
 
 	api.HandleFunc("/export", exportHandler(dep.Users, dep.Groups)).Methods(http.MethodGet)
+
+	api.HandleFunc("/audit", auditListHandler(dep.Audit)).Methods(http.MethodGet)
+	api.HandleFunc("/audit/export", auditExportHandler(dep.Audit)).Methods(http.MethodGet)
 
 	// Mount SCIM 2.0 under /scim/v2 with its own credential.
 	// SCIMKey takes precedence; falls back to APIKey so existing single-key
@@ -270,7 +275,7 @@ func listUsersHandler(users store.UserStore) http.HandlerFunc {
 	}
 }
 
-func createUserHandler(users store.UserStore) http.HandlerFunc {
+func createUserHandler(users store.UserStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := decodeUser(w, r.Body)
 		if !ok {
@@ -292,6 +297,7 @@ func createUserHandler(users store.UserStore) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "create_user_failed", err.Error())
 			return
 		}
+		audit.Emit(as, audit.EventUserCreated, "system", created.ID, map[string]any{"email": created.Email})
 		writeJSON(w, http.StatusCreated, created)
 	}
 }
@@ -312,7 +318,7 @@ func getUserHandler(users store.UserStore) http.HandlerFunc {
 	}
 }
 
-func updateUserHandler(users store.UserStore) http.HandlerFunc {
+func updateUserHandler(users store.UserStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := decodeUser(w, r.Body)
 		if !ok {
@@ -332,11 +338,12 @@ func updateUserHandler(users store.UserStore) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "update_user_failed", err.Error())
 			return
 		}
+		audit.Emit(as, audit.EventUserUpdated, "system", updated.ID, map[string]any{"email": updated.Email})
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
 
-func deleteUserHandler(users store.UserStore) http.HandlerFunc {
+func deleteUserHandler(users store.UserStore, as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := mux.Vars(r)["id"]
 		if err := users.Delete(id); err != nil {
@@ -347,6 +354,7 @@ func deleteUserHandler(users store.UserStore) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "delete_user_failed", err.Error())
 			return
 		}
+		audit.Emit(as, audit.EventUserDeleted, "system", id, nil)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
