@@ -41,7 +41,7 @@ func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, dst any) {
 	}
 }
 
-func TestB1_SelectUser_WebAuthn_GoesToWebAuthnPending(t *testing.T) {
+func TestSelectUser_WebAuthn_GoesToWebAuthnPending(t *testing.T) {
 	router, flows, _ := newWebAuthnTestDeps()
 
 	flowReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows", nil)
@@ -76,7 +76,7 @@ func TestB1_SelectUser_WebAuthn_GoesToWebAuthnPending(t *testing.T) {
 	}
 }
 
-func TestB1_WebAuthnResponse_AdvancesToMFAApproved(t *testing.T) {
+func TestWebAuthnResponse_AdvancesToMFAApproved(t *testing.T) {
 	router, flows, _ := newWebAuthnTestDeps()
 
 	flowReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows", nil)
@@ -110,7 +110,7 @@ func TestB1_WebAuthnResponse_AdvancesToMFAApproved(t *testing.T) {
 	}
 }
 
-func TestB1_WebAuthnResponse_WrongState_Returns409(t *testing.T) {
+func TestWebAuthnResponse_WrongState_Returns409(t *testing.T) {
 	router, _, _ := newWebAuthnTestDeps()
 
 	flowReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows", nil)
@@ -129,7 +129,7 @@ func TestB1_WebAuthnResponse_WrongState_Returns409(t *testing.T) {
 	}
 }
 
-func TestB1_Notifications_WebAuthnPending_IncludesChallenge(t *testing.T) {
+func TestNotifications_WebAuthnPending_IncludesChallenge(t *testing.T) {
 	router, flows, _ := newWebAuthnTestDeps()
 
 	flowReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows", nil)
@@ -169,7 +169,7 @@ func TestB1_Notifications_WebAuthnPending_IncludesChallenge(t *testing.T) {
 	}
 }
 
-func TestB1_AllNotifications_IncludesWebAuthnPending(t *testing.T) {
+func TestAllNotifications_IncludesWebAuthnPending(t *testing.T) {
 	router, _, _ := newWebAuthnTestDeps()
 
 	flowReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows", nil)
@@ -205,7 +205,7 @@ func TestB1_AllNotifications_IncludesWebAuthnPending(t *testing.T) {
 	}
 }
 
-func TestB1_ExistingMFAMethods_Unaffected(t *testing.T) {
+func TestExistingMFAMethods_Unaffected(t *testing.T) {
 	cases := []struct {
 		method        string
 		expectedState string

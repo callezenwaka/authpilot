@@ -30,7 +30,7 @@ func newAuditRouter() (http.Handler, *memory.AuditStore) {
 // Emission tests
 // ---------------------------------------------------------------------------
 
-func TestB2_UserCreated_EmitsAuditEvent(t *testing.T) {
+func TestUserCreated_EmitsAuditEvent(t *testing.T) {
 	router, as := newAuditRouter()
 
 	body := `{"id":"usr_audit1","email":"a@example.com"}`
@@ -52,7 +52,7 @@ func TestB2_UserCreated_EmitsAuditEvent(t *testing.T) {
 	}
 }
 
-func TestB2_UserUpdated_EmitsAuditEvent(t *testing.T) {
+func TestUserUpdated_EmitsAuditEvent(t *testing.T) {
 	router, as := newAuditRouter()
 
 	// Create first.
@@ -74,7 +74,7 @@ func TestB2_UserUpdated_EmitsAuditEvent(t *testing.T) {
 	}
 }
 
-func TestB2_UserDeleted_EmitsAuditEvent(t *testing.T) {
+func TestUserDeleted_EmitsAuditEvent(t *testing.T) {
 	router, as := newAuditRouter()
 
 	cr := httptest.NewRequest(http.MethodPost, "/api/v1/users", strings.NewReader(`{"id":"usr_del","email":"del@example.com"}`))
@@ -97,7 +97,7 @@ func TestB2_UserDeleted_EmitsAuditEvent(t *testing.T) {
 	}
 }
 
-func TestB2_FlowComplete_EmitsAuditEvent(t *testing.T) {
+func TestFlowComplete_EmitsAuditEvent(t *testing.T) {
 	users := memory.NewUserStore()
 	as := memory.NewAuditStore(0)
 	if _, err := users.Create(domain.User{ID: "usr_fc", Email: "fc@example.com", Active: true}); err != nil {
@@ -139,7 +139,7 @@ func TestB2_FlowComplete_EmitsAuditEvent(t *testing.T) {
 	}
 }
 
-func TestB2_FlowDenied_EmitsAuditEvent(t *testing.T) {
+func TestFlowDenied_EmitsAuditEvent(t *testing.T) {
 	users := memory.NewUserStore()
 	as := memory.NewAuditStore(0)
 	if _, err := users.Create(domain.User{ID: "usr_push", Email: "push@example.com", MFAMethod: "push", Active: true}); err != nil {
@@ -182,7 +182,7 @@ func TestB2_FlowDenied_EmitsAuditEvent(t *testing.T) {
 // GET /api/v1/audit
 // ---------------------------------------------------------------------------
 
-func TestB2_AuditList_Empty(t *testing.T) {
+func TestAuditList_Empty(t *testing.T) {
 	router, _ := newAuditRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
 	rec := httptest.NewRecorder()
@@ -198,7 +198,7 @@ func TestB2_AuditList_Empty(t *testing.T) {
 	}
 }
 
-func TestB2_AuditList_EventTypeFilter(t *testing.T) {
+func TestAuditList_EventTypeFilter(t *testing.T) {
 	router, _ := newAuditRouter()
 
 	// Create two users — generates two user.created events.
@@ -224,7 +224,7 @@ func TestB2_AuditList_EventTypeFilter(t *testing.T) {
 	}
 }
 
-func TestB2_AuditList_SinceFilter(t *testing.T) {
+func TestAuditList_SinceFilter(t *testing.T) {
 	router, as := newAuditRouter()
 
 	// Manually inject an old event.
@@ -256,7 +256,7 @@ func TestB2_AuditList_SinceFilter(t *testing.T) {
 	}
 }
 
-func TestB2_AuditList_InvalidSince_Returns400(t *testing.T) {
+func TestAuditList_InvalidSince_Returns400(t *testing.T) {
 	router, _ := newAuditRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit?since=notadate", nil)
 	rec := httptest.NewRecorder()
@@ -266,7 +266,7 @@ func TestB2_AuditList_InvalidSince_Returns400(t *testing.T) {
 	}
 }
 
-func TestB2_AuditList_NilStore_ReturnsEmpty(t *testing.T) {
+func TestAuditList_NilStore_ReturnsEmpty(t *testing.T) {
 	router := NewRouter(Dependencies{
 		Users:    memory.NewUserStore(),
 		Groups:   memory.NewGroupStore(),
@@ -286,7 +286,7 @@ func TestB2_AuditList_NilStore_ReturnsEmpty(t *testing.T) {
 // GET /api/v1/audit/export
 // ---------------------------------------------------------------------------
 
-func TestB2_AuditExport_JSONND(t *testing.T) {
+func TestAuditExport_JSONND(t *testing.T) {
 	router, as := newAuditRouter()
 	as.Append(domain.AuditEvent{
 		ID: "aud_1", Timestamp: time.Now().UTC(),
@@ -311,7 +311,7 @@ func TestB2_AuditExport_JSONND(t *testing.T) {
 	}
 }
 
-func TestB2_AuditExport_CEF(t *testing.T) {
+func TestAuditExport_CEF(t *testing.T) {
 	router, as := newAuditRouter()
 	as.Append(domain.AuditEvent{
 		ID: "aud_2", Timestamp: time.Now().UTC(),
@@ -334,7 +334,7 @@ func TestB2_AuditExport_CEF(t *testing.T) {
 	}
 }
 
-func TestB2_AuditExport_Syslog(t *testing.T) {
+func TestAuditExport_Syslog(t *testing.T) {
 	router, as := newAuditRouter()
 	as.Append(domain.AuditEvent{
 		ID: "aud_3", Timestamp: time.Now().UTC(),
@@ -357,7 +357,7 @@ func TestB2_AuditExport_Syslog(t *testing.T) {
 	}
 }
 
-func TestB2_AuditExport_MissingFormat_Returns400(t *testing.T) {
+func TestAuditExport_MissingFormat_Returns400(t *testing.T) {
 	router, _ := newAuditRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit/export", nil)
 	rec := httptest.NewRecorder()
@@ -367,7 +367,7 @@ func TestB2_AuditExport_MissingFormat_Returns400(t *testing.T) {
 	}
 }
 
-func TestB2_AuditExport_UnknownFormat_Returns400(t *testing.T) {
+func TestAuditExport_UnknownFormat_Returns400(t *testing.T) {
 	router, _ := newAuditRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/audit/export?format=xml", nil)
 	rec := httptest.NewRecorder()
@@ -377,7 +377,7 @@ func TestB2_AuditExport_UnknownFormat_Returns400(t *testing.T) {
 	}
 }
 
-func TestB2_AuditExport_NilStore_Returns501(t *testing.T) {
+func TestAuditExport_NilStore_Returns501(t *testing.T) {
 	router := NewRouter(Dependencies{
 		Users:    memory.NewUserStore(),
 		Groups:   memory.NewGroupStore(),
@@ -397,7 +397,7 @@ func TestB2_AuditExport_NilStore_Returns501(t *testing.T) {
 // Ring-buffer eviction
 // ---------------------------------------------------------------------------
 
-func TestB2_RingBuffer_Eviction(t *testing.T) {
+func TestRingBuffer_Eviction(t *testing.T) {
 	as := memory.NewAuditStore(3)
 	for i := range 5 {
 		as.Append(domain.AuditEvent{

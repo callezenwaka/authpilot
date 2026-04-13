@@ -11,7 +11,7 @@ import (
 	"authpilot/server/internal/store/memory"
 )
 
-func newM7Router() http.Handler {
+func newMiddlewareRouter() http.Handler {
 	return NewRouter(Dependencies{
 		Users:     memory.NewUserStore(),
 		Groups:    memory.NewGroupStore(),
@@ -24,7 +24,7 @@ func newM7Router() http.Handler {
 // --- OpenAPI ---
 
 func TestOpenAPISpecHandler(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/openapi.json", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -49,7 +49,7 @@ func TestOpenAPISpecHandler(t *testing.T) {
 }
 
 func TestOpenAPIDocsHandler(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/docs", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -65,7 +65,7 @@ func TestOpenAPIDocsHandler(t *testing.T) {
 // --- Export ---
 
 func TestExportHandlerSCIM(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/export?format=scim", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -82,7 +82,7 @@ func TestExportHandlerSCIM(t *testing.T) {
 }
 
 func TestExportHandlerOkta(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/export?format=okta", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -96,7 +96,7 @@ func TestExportHandlerOkta(t *testing.T) {
 }
 
 func TestExportHandlerAzure(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/export?format=azure", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -107,7 +107,7 @@ func TestExportHandlerAzure(t *testing.T) {
 }
 
 func TestExportHandlerGoogle(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/export?format=google", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -118,7 +118,7 @@ func TestExportHandlerGoogle(t *testing.T) {
 }
 
 func TestExportHandlerMissingFormat(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/export", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -129,7 +129,7 @@ func TestExportHandlerMissingFormat(t *testing.T) {
 }
 
 func TestExportHandlerUnknownFormat(t *testing.T) {
-	r := newM7Router()
+	r := newMiddlewareRouter()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/export?format=nope", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
