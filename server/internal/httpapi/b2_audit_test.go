@@ -100,7 +100,9 @@ func TestB2_UserDeleted_EmitsAuditEvent(t *testing.T) {
 func TestB2_FlowComplete_EmitsAuditEvent(t *testing.T) {
 	users := memory.NewUserStore()
 	as := memory.NewAuditStore(0)
-	users.Create(domain.User{ID: "usr_fc", Email: "fc@example.com", Active: true})
+	if _, err := users.Create(domain.User{ID: "usr_fc", Email: "fc@example.com", Active: true}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
 	router := NewRouter(Dependencies{
 		Users:    users,
 		Groups:   memory.NewGroupStore(),
@@ -114,7 +116,7 @@ func TestB2_FlowComplete_EmitsAuditEvent(t *testing.T) {
 	frec := httptest.NewRecorder()
 	router.ServeHTTP(frec, fr)
 	var flow map[string]any
-	json.NewDecoder(frec.Body).Decode(&flow)
+	decodeJSON(t, frec, &flow)
 	flowID := flow["id"].(string)
 
 	// Select user (no MFA → goes to complete).
@@ -140,7 +142,9 @@ func TestB2_FlowComplete_EmitsAuditEvent(t *testing.T) {
 func TestB2_FlowDenied_EmitsAuditEvent(t *testing.T) {
 	users := memory.NewUserStore()
 	as := memory.NewAuditStore(0)
-	users.Create(domain.User{ID: "usr_push", Email: "push@example.com", MFAMethod: "push", Active: true})
+	if _, err := users.Create(domain.User{ID: "usr_push", Email: "push@example.com", MFAMethod: "push", Active: true}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
 	router := NewRouter(Dependencies{
 		Users:    users,
 		Groups:   memory.NewGroupStore(),
@@ -153,7 +157,7 @@ func TestB2_FlowDenied_EmitsAuditEvent(t *testing.T) {
 	frec := httptest.NewRecorder()
 	router.ServeHTTP(frec, fr)
 	var flow map[string]any
-	json.NewDecoder(frec.Body).Decode(&flow)
+	decodeJSON(t, frec, &flow)
 	flowID := flow["id"].(string)
 
 	su := httptest.NewRequest(http.MethodPost, "/api/v1/flows/"+flowID+"/select-user",
@@ -188,7 +192,7 @@ func TestB2_AuditList_Empty(t *testing.T) {
 		t.Fatalf("want 200, got %d", rec.Code)
 	}
 	var events []domain.AuditEvent
-	json.NewDecoder(rec.Body).Decode(&events)
+	decodeJSON(t, rec, &events)
 	if len(events) != 0 {
 		t.Errorf("expected empty list, got %d events", len(events))
 	}
@@ -214,7 +218,7 @@ func TestB2_AuditList_EventTypeFilter(t *testing.T) {
 	router.ServeHTTP(rec, req2)
 
 	var events []domain.AuditEvent
-	json.NewDecoder(rec.Body).Decode(&events)
+	decodeJSON(t, rec, &events)
 	if len(events) != 2 {
 		t.Errorf("expected 2 user.created events, got %d", len(events))
 	}
@@ -243,7 +247,7 @@ func TestB2_AuditList_SinceFilter(t *testing.T) {
 	router.ServeHTTP(rec, req2)
 
 	var events []domain.AuditEvent
-	json.NewDecoder(rec.Body).Decode(&events)
+	decodeJSON(t, rec, &events)
 	if len(events) != 1 {
 		t.Errorf("expected 1 recent event, got %d", len(events))
 	}

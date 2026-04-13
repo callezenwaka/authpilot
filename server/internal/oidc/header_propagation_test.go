@@ -31,7 +31,10 @@ func seedHeaderPropUser(dep RouterDeps) (domain.User, string) {
 		DisplayName: "HP User",
 		Groups:      []string{"admins", "devs"},
 	}
-	created, _ := dep.Users.Create(u)
+	created, err := dep.Users.Create(u)
+	if err != nil {
+		panic("seed header prop user: " + err.Error())
+	}
 
 	// Use the dep's issuer to sign (so the dep's KeyManager can verify).
 	token, _ := dep.Issuer.MintForUser(created, "test-client", nil, 0)
