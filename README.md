@@ -12,8 +12,13 @@ A local-first authentication development platform. Build and test OIDC flows aga
 ## Quick Start
 
 ```bash
-go run ./server/cmd/authpilot
+git clone https://github.com/<owner>/authpilot
+cd authpilot
+make setup
+make dev
 ```
+
+`make setup` installs frontend dependencies for both SPAs. `make dev` starts the Go server with hot-reload (`air`) and watches both SPAs for changes. Open `http://localhost:18025` for the admin UI.
 
 With a config file:
 
@@ -31,6 +36,8 @@ docker compose up --build
 
 | Target | Description |
 |--------|-------------|
+| `make setup` | Install npm dependencies for both SPAs (run once after clone) |
+| `make dev` | Start server with hot-reload + watch both SPAs for changes |
 | `make build` | Compile the binary |
 | `make test` | Run all tests |
 | `make lint` | Run golangci-lint |
@@ -54,12 +61,6 @@ Rebuild the admin SPA before starting:
 
 ```bash
 make run BUILD=1
-```
-
-Watch for client-side changes while running:
-
-```bash
-make run WATCH=1
 ```
 
 ## Configuration

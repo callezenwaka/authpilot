@@ -35,5 +35,6 @@ pnpm-debug.log*
 *.db
 /.tmp/
 
-roadmap-v1.md
-spec-v1.md
+roadmap-v*.md
+spec-v*.md
+onboard.md

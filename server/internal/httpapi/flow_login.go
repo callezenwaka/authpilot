@@ -150,6 +150,9 @@ func listFlowsHandler(flows store.FlowStore) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "list_flows_failed", err.Error())
 			return
 		}
+		if result == nil {
+			result = []domain.Flow{}
+		}
 		writeJSON(w, http.StatusOK, result)
 	}
 }

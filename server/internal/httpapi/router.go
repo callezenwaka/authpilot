@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -412,8 +413,7 @@ func createUserHandler(users store.UserStore, as store.AuditStore, sc SCIMClient
 			return
 		}
 		if user.ID == "" {
-			writeError(w, http.StatusBadRequest, "validation_error", "id is required")
-			return
+			user.ID = fmt.Sprintf("usr_%d", time.Now().UnixNano())
 		}
 		if user.CreatedAt.IsZero() {
 			user.CreatedAt = time.Now().UTC()
@@ -533,8 +533,7 @@ func createGroupHandler(groups store.GroupStore) http.HandlerFunc {
 			return
 		}
 		if group.ID == "" {
-			writeError(w, http.StatusBadRequest, "validation_error", "id is required")
-			return
+			group.ID = fmt.Sprintf("grp_%d", time.Now().UnixNano())
 		}
 		if group.CreatedAt.IsZero() {
 			group.CreatedAt = time.Now().UTC()
