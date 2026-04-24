@@ -35,20 +35,47 @@ type loginViewData struct {
 
 var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Furnace Login</title></head>
+<head>
+<meta charset="utf-8"><title>Furnace Login</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:#f5f6fa;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .card{background:#fff;border:1px solid #e2e4ea;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);width:100%;max-width:440px;padding:32px}
+  .logo{font-weight:700;font-size:18px;color:#1e293b;margin-bottom:24px;letter-spacing:.02em}.logo span{color:#2563eb}
+  h1{margin:0 0 4px;font-size:1.25rem;font-weight:700}
+  .sub{color:#6b7280;font-size:.875rem;margin-bottom:24px}
+  .err{color:#dc2626;font-size:.875rem;margin-bottom:16px;padding:10px 12px;background:#fee2e2;border-radius:6px}
+  .user-option{display:block;border:1px solid #e2e4ea;border-radius:6px;padding:10px 14px;margin-bottom:8px;cursor:pointer;transition:border-color .15s,background .15s}
+  .user-option:hover{border-color:#2563eb;background:#f0f6ff}
+  .user-option input{display:none}
+  .user-option input:checked~.user-label{font-weight:600;color:#1d4ed8}
+  .user-label{display:flex;flex-direction:column;gap:2px;pointer-events:none}
+  .user-name{font-size:.9rem;font-weight:500}
+  .user-meta{font-size:.78rem;color:#6b7280}
+  .mfa-badge{display:inline-block;padding:1px 6px;border-radius:999px;font-size:.7rem;font-weight:600;background:#dbeafe;color:#1d4ed8;margin-left:4px}
+  button{width:100%;margin-top:16px;padding:9px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:.95rem;font-weight:500;cursor:pointer;transition:background .15s}
+  button:hover{background:#1d4ed8}
+</style>
+</head>
 <body>
-  <h1>Sign In</h1>
-  <p>Flow ID: {{.FlowID}}</p>
-  {{if .HasError}}<p style="color:#b00">{{.Error}}</p>{{end}}
-  <form method="post" action="/login/select-user?flow_id={{.FlowID}}">
-    {{range .Users}}
-      <label style="display:block;margin:8px 0;">
-        <input type="radio" name="user_id" value="{{.ID}}" required>
-        {{.DisplayName}} ({{.Email}}) - MFA: {{.MFAMethod}}
-      </label>
-    {{end}}
-    <button type="submit">Continue</button>
-  </form>
+  <div class="card">
+    <div class="logo">Fur<span>nace</span></div>
+    <h1>Sign In</h1>
+    <p class="sub">Select your account to continue</p>
+    {{if .HasError}}<div class="err">{{.Error}}</div>{{end}}
+    <form method="post" action="/login/select-user?flow_id={{.FlowID}}">
+      {{range .Users}}
+        <label class="user-option">
+          <input type="radio" name="user_id" value="{{.ID}}" required>
+          <div class="user-label">
+            <span class="user-name">{{.DisplayName}}{{if .MFAMethod}}<span class="mfa-badge">{{.MFAMethod}}</span>{{end}}</span>
+            <span class="user-meta">{{.Email}}</span>
+          </div>
+        </label>
+      {{end}}
+      <button type="submit">Continue</button>
+    </form>
+  </div>
 </body>
 </html>`))
 
@@ -81,11 +108,11 @@ var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
     <form method="post" action="/api/v1/flows/{{.FlowID}}/webauthn-response">
       <button type="submit">Authenticate (Simulate)</button>
     </form>
-    <a class="hub-link" href="/notify" target="_blank">→ Open passkey hub</a>
+    <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
   {{else if eq .User.MFAMethod "push"}}
     <div class="spinner"></div>
     <p class="waiting">Waiting for push approval on your device…</p>
-    <a class="hub-link" href="/notify" target="_blank">→ Open approval screen</a>
+    <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
     <script>
       const flowId = {{printf "%q" .FlowID}};
       setInterval(async () => {
@@ -100,7 +127,7 @@ var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
   {{else if eq .User.MFAMethod "magic_link"}}
     <p>We sent a sign-in link to <strong>{{.User.Email}}</strong>.</p>
     <p class="waiting">Click the link in your email to continue.</p>
-    <a class="hub-link" href="/notify" target="_blank">→ View email in notification hub</a>
+    <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
     <script>
       const flowId = {{printf "%q" .FlowID}};
       setInterval(async () => {
@@ -118,28 +145,57 @@ var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
       <input type="text" name="code" placeholder="000000" autocomplete="one-time-code" required>
       <button type="submit">Verify</button>
     </form>
-    <a class="hub-link" href="/notify" target="_blank">→ View SMS in notification hub</a>
+    <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
   {{else}}
     <p>Enter the code from your authenticator app:</p>
     <form method="post" action="/login/mfa?flow_id={{.FlowID}}">
       <input type="text" name="code" placeholder="000000" autocomplete="one-time-code" required>
       <button type="submit">Verify</button>
     </form>
-    <a class="hub-link" href="/notify" target="_blank">→ View code in notification hub</a>
+    <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
   {{end}}
 </body>
 </html>`))
 
 var completeTemplate = template.Must(template.New("complete").Parse(`<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Furnace Complete</title></head>
+<head>
+<meta charset="utf-8"><title>Furnace Complete</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:#f5f6fa;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .card{background:#fff;border:1px solid #e2e4ea;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);width:100%;max-width:440px;padding:32px}
+  .logo{font-weight:700;font-size:18px;color:#1e293b;margin-bottom:24px;letter-spacing:.02em}.logo span{color:#2563eb}
+  .icon{font-size:2.5rem;margin-bottom:12px}
+  h1{margin:0 0 4px;font-size:1.25rem;font-weight:700}
+  .sub{color:#6b7280;font-size:.875rem;margin-bottom:20px}
+  .detail{background:#f5f6fa;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:.85rem}
+  .detail dt{color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.04em;font-size:.72rem;margin-bottom:2px}
+  .detail dd{margin:0 0 10px;word-break:break-all}.detail dd:last-child{margin-bottom:0}
+  .err{color:#dc2626;font-size:.875rem;padding:10px 12px;background:#fee2e2;border-radius:6px;margin-bottom:16px}
+  a{color:#2563eb;text-decoration:none;font-size:.875rem}.a:hover{text-decoration:underline}
+</style>
+</head>
 <body>
-  <h1>Flow Result</h1>
-  <p>Flow ID: {{.FlowID}}</p>
-  <p>State: {{.Flow.State}}</p>
-  {{if .Flow.UserID}}<p>User: {{.User.DisplayName}} ({{.User.Email}})</p>{{end}}
-  {{if .Flow.Error}}<p style="color:#b00">Error: {{.Flow.Error}}</p>{{end}}
-  <p><a href="/login?flow_id={{.FlowID}}">Back to login</a></p>
+  <div class="card">
+    <div class="logo">Fur<span>nace</span></div>
+    {{if .Flow.Error}}
+      <div class="icon">❌</div>
+      <h1>Authentication Failed</h1>
+      <p class="sub">The login flow could not be completed.</p>
+      <div class="err">{{.Flow.Error}}</div>
+    {{else}}
+      <div class="icon">✅</div>
+      <h1>Authentication Complete</h1>
+      <p class="sub">The login flow finished successfully.</p>
+    {{end}}
+    <dl class="detail">
+      <dt>State</dt><dd>{{.Flow.State}}</dd>
+      {{if .Flow.UserID}}<dt>User</dt><dd>{{.User.DisplayName}} ({{.User.Email}})</dd>{{end}}
+      <dt>Flow ID</dt><dd>{{.FlowID}}</dd>
+    </dl>
+    <a href="/login">← Start a new login</a>
+  </div>
 </body>
 </html>`))
 

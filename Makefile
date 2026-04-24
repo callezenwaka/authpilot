@@ -161,18 +161,12 @@ dev:
 	@mkdir -p .tmp
 	@echo "Starting admin SPA watcher (log: .tmp/admin-watch.log)"
 	@cd client/admin-spa && npm install && npm run build -- --watch > ../../.tmp/admin-watch.log 2>&1 & echo $$! > .tmp/admin-spa.pid
-	@echo "Starting notify SPA watcher (log: .tmp/notify-watch.log)"
-	@cd client/notify-spa && npm install && npm run build -- --watch > ../../.tmp/notify-watch.log 2>&1 & echo $$! > .tmp/notify-spa.pid
 	@echo "Starting Go server with hot-reload (air)"
-	@trap 'kill $$(cat .tmp/admin-spa.pid 2>/dev/null) $$(cat .tmp/notify-spa.pid 2>/dev/null) 2>/dev/null || true; rm -f .tmp/admin-spa.pid .tmp/notify-spa.pid' INT TERM EXIT; \
+	@trap 'kill $$(cat .tmp/admin-spa.pid 2>/dev/null) 2>/dev/null || true; rm -f .tmp/admin-spa.pid' INT TERM EXIT; \
 	air
 
 setup:
-	cd client/admin-spa  && npm install
-	cd client/notify-spa && npm install
+	cd client/admin-spa && npm install
 
 admin-build:
 	cd client/admin-spa && npm install && npm run build
-
-notify-build:
-	cd client/notify-spa && npm install && npm run build

@@ -56,7 +56,12 @@
             </tr>
           </tbody>
         </table>
-        <div v-else class="empty">{{ loading ? 'Loading…' : 'No audit events match the current filter.' }}</div>
+        <div v-else class="empty">
+          <svg v-if="loading" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom:12px;opacity:.4;animation:spin .8s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><style>@keyframes spin{to{transform:rotate(360deg)}}</style></svg>
+          <svg v-else width="32" height="32" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2" style="margin-bottom:12px;opacity:.4"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h7a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h4a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
+          <div style="margin-bottom:4px;font-weight:500;color:var(--text)">{{ loading ? 'Loading…' : 'No audit events' }}</div>
+          <div v-if="!loading">{{ filterType || filterSince ? 'No events match the current filter.' : 'Events are recorded as users and groups are created, updated, and deleted.' }}</div>
+        </div>
       </div>
     </div>
   </div>

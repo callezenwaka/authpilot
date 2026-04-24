@@ -48,7 +48,11 @@
             </template>
           </tbody>
         </table>
-        <div v-else class="empty">No sessions yet. Complete an OIDC flow to create one.</div>
+        <div v-else class="empty">
+          <svg width="32" height="32" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2" style="margin-bottom:12px;opacity:.4"><path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clip-rule="evenodd"/></svg>
+          <div style="margin-bottom:8px;font-weight:500;color:var(--text)">No sessions yet</div>
+          <div>Sessions appear here after a user completes an OIDC login flow.</div>
+        </div>
       </div>
     </div>
   </div>

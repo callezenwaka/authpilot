@@ -70,7 +70,6 @@ type Dependencies struct {
 	Sessions        store.SessionStore
 	Audit           store.AuditStore  // nil = audit disabled
 	AdminStaticDir  string
-	NotifyStaticDir string
 	APIKey          string        // empty = local dev mode (no auth required); ignored in multi-tenant mode
 	SCIMKey         string        // separate credential for /scim/v2; falls back to APIKey when empty
 	BaseURL         string        // e.g. "http://localhost:8025" — used for magic link URLs
@@ -110,7 +109,6 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Use(requestIDMiddleware)
 
 	registerAdminRoutes(r, dep.AdminStaticDir)
-	registerNotifyRoutes(r, dep.NotifyStaticDir)
 
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
 	r.HandleFunc("/login", loginPageHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
@@ -701,18 +699,6 @@ func listAllNotificationsHandler(flows store.FlowStore, users store.UserStore, b
 	}
 }
 
-// registerNotifyRoutes serves the /notify Vue SPA.
-func registerNotifyRoutes(r *mux.Router, notifyStaticDir string) {
-	if notifyStaticDir == "" {
-		notifyStaticDir = filepath.Join("server", "web", "static", "notify")
-	}
-	indexPath := filepath.Join(notifyStaticDir, "index.html")
-	assets := http.StripPrefix("/notify/", http.FileServer(http.Dir(notifyStaticDir)))
-
-	r.PathPrefix("/notify/assets/").Handler(assets)
-	r.HandleFunc("/notify", serveAdminIndex(indexPath))
-	r.PathPrefix("/notify/").HandlerFunc(serveAdminIndex(indexPath))
-}
 
 // loginMagicHandler completes a flow via a magic link token.
 func loginMagicHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
