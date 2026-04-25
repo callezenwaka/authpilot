@@ -95,11 +95,18 @@ type scimUser struct {
 	ID          string            `json:"id"`
 	ExternalID  string            `json:"externalId,omitempty"`
 	UserName    string            `json:"userName"`
+	Name        scimName          `json:"name"`
 	DisplayName string            `json:"displayName,omitempty"`
 	Emails      []scimEmail       `json:"emails"`
 	Groups      []scimGroupRef    `json:"groups,omitempty"`
 	Active      bool              `json:"active"`
 	Meta        scimMeta          `json:"meta"`
+}
+
+type scimName struct {
+	Formatted  string `json:"formatted,omitempty"`
+	GivenName  string `json:"givenName,omitempty"`
+	FamilyName string `json:"familyName,omitempty"`
 }
 
 type scimEmail struct {
@@ -138,14 +145,20 @@ func scimUsers(users []domain.User, groups []domain.Group) ([]byte, error) {
 			}
 			groupRefs = append(groupRefs, ref)
 		}
+		first, last := splitDisplayName(u.DisplayName)
 		resources = append(resources, scimUser{
 			Schemas:     []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
 			ID:          u.ID,
 			UserName:    u.Email,
+			Name: scimName{
+				Formatted:  u.DisplayName,
+				GivenName:  first,
+				FamilyName: last,
+			},
 			DisplayName: u.DisplayName,
 			Emails:      []scimEmail{{Value: u.Email, Type: "work", Primary: true}},
 			Groups:      groupRefs,
-			Active:      true,
+			Active:      u.Active,
 			Meta: scimMeta{
 				ResourceType: "User",
 				Created:      u.CreatedAt.UTC().Format(time.RFC3339),
@@ -206,13 +219,21 @@ type azureExport struct {
 }
 
 type azureUser struct {
-	UserPrincipalName string   `json:"userPrincipalName"`
-	DisplayName       string   `json:"displayName"`
-	MailNickname      string   `json:"mailNickname"`
-	Mail              string   `json:"mail"`
-	MobilePhone       string   `json:"mobilePhone,omitempty"`
-	AccountEnabled    bool     `json:"accountEnabled"`
-	GroupMemberships  []string `json:"groupMemberships,omitempty"`
+	UserPrincipalName string              `json:"userPrincipalName"`
+	DisplayName       string              `json:"displayName"`
+	GivenName         string              `json:"givenName,omitempty"`
+	Surname           string              `json:"surname,omitempty"`
+	MailNickname      string              `json:"mailNickname"`
+	Mail              string              `json:"mail"`
+	MobilePhone       string              `json:"mobilePhone,omitempty"`
+	AccountEnabled    bool                `json:"accountEnabled"`
+	PasswordProfile   azurePasswordProfile `json:"passwordProfile"`
+	GroupMemberships  []string            `json:"groupMemberships,omitempty"`
+}
+
+type azurePasswordProfile struct {
+	Password                      string `json:"password"`
+	ForceChangePasswordNextSignIn bool   `json:"forceChangePasswordNextSignIn"`
 }
 
 type azureGroup struct {
@@ -227,14 +248,21 @@ func azureJSON(users []domain.User, groups []domain.Group) ([]byte, error) {
 	azUsers := make([]azureUser, 0, len(users))
 	for _, u := range users {
 		nick := strings.Split(u.Email, "@")[0]
+		first, last := splitDisplayName(u.DisplayName)
 		azUsers = append(azUsers, azureUser{
 			UserPrincipalName: u.Email,
 			DisplayName:       u.DisplayName,
+			GivenName:         first,
+			Surname:           last,
 			MailNickname:      nick,
 			Mail:              u.Email,
 			MobilePhone:       u.PhoneNumber,
-			AccountEnabled:    true,
-			GroupMemberships:  u.Groups,
+			AccountEnabled:    u.Active,
+			PasswordProfile: azurePasswordProfile{
+				Password:                      "ChangeMe123!",
+				ForceChangePasswordNextSignIn: true,
+			},
+			GroupMemberships: u.Groups,
 		})
 	}
 
@@ -301,7 +329,10 @@ func googleCSV(users []domain.User) ([]byte, error) {
 		row[3] = "ChangeMe123!" // placeholder — user must reset on first login
 		row[4] = ""
 		row[5] = "/"
-		// remaining columns left empty
+		// index 13 = Mobile Phone
+		row[13] = u.PhoneNumber
+		// index 25 = Change Password at Next Sign-In
+		row[25] = "TRUE"
 		if err := w.Write(row); err != nil {
 			return nil, err
 		}

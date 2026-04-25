@@ -111,12 +111,30 @@ func NewRouter(dep Dependencies) http.Handler {
 	registerAdminRoutes(r, dep.AdminStaticDir)
 
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
-	r.HandleFunc("/login", loginPageHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
-	r.HandleFunc("/login/select-user", loginSelectUserHandler(dep.Flows, dep.Users)).Methods(http.MethodPost)
-	r.HandleFunc("/login/mfa", loginMFAHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
-	r.HandleFunc("/login/mfa", loginMFASubmitHandler(dep.Flows, dep.Users)).Methods(http.MethodPost)
-	r.HandleFunc("/login/complete", loginCompleteHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
-	r.HandleFunc("/login/magic", loginMagicHandler(dep.Flows, dep.Users)).Methods(http.MethodGet)
+	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		loginPageHandler(flows, users)(w, r)
+	}).Methods(http.MethodGet)
+	r.HandleFunc("/login/select-user", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		loginSelectUserHandler(flows, users)(w, r)
+	}).Methods(http.MethodPost)
+	r.HandleFunc("/login/mfa", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		loginMFAHandler(flows, users)(w, r)
+	}).Methods(http.MethodGet)
+	r.HandleFunc("/login/mfa", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		loginMFASubmitHandler(flows, users)(w, r)
+	}).Methods(http.MethodPost)
+	r.HandleFunc("/login/complete", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		loginCompleteHandler(flows, users)(w, r)
+	}).Methods(http.MethodGet)
+	r.HandleFunc("/login/magic", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		loginMagicHandler(flows, users)(w, r)
+	}).Methods(http.MethodGet)
 
 	api := r.PathPrefix("/api/v1").Subrouter()
 	if dep.TenantStores != nil && len(dep.TenantEntries) > 0 {
@@ -207,6 +225,18 @@ func NewRouter(dep Dependencies) http.Handler {
 		_, _, flows, _, as := dep.resolveStores(r.Context())
 		denyFlowHandler(flows, as)(w, r)
 	}).Methods(http.MethodPost)
+	api.HandleFunc("/flows/{id}/webauthn-begin-register", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		webauthnBeginRegisterHandler(flows, users)(w, r)
+	}).Methods(http.MethodGet)
+	api.HandleFunc("/flows/{id}/webauthn-finish-register", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		webauthnFinishRegisterHandler(flows, users)(w, r)
+	}).Methods(http.MethodPost)
+	api.HandleFunc("/flows/{id}/webauthn-begin", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		webauthnBeginHandler(flows, users)(w, r)
+	}).Methods(http.MethodGet)
 	api.HandleFunc("/flows/{id}/webauthn-response", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, as := dep.resolveStores(r.Context())
 		webauthnResponseHandler(flows, users, as)(w, r)

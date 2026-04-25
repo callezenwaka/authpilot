@@ -85,6 +85,24 @@
         </div>
       </template>
 
+      <!-- Passkeys (WebAuthn) -->
+      <template v-if="activeTab === 'webauthn'">
+        <div v-if="webauthnItems.length === 0" class="nd-empty">No pending passkey authentications.</div>
+        <div v-for="item in webauthnItems" :key="item.flow_id" class="nd-card">
+          <div class="nd-card-header">
+            <span style="font-weight:600">Passkey Authentication</span>
+            <span class="badge badge-blue">WebAuthn</span>
+          </div>
+          <div class="nd-meta">{{ item.user_email || item.user_id }}</div>
+          <div class="nd-meta" style="word-break:break-all">
+            Challenge: <code style="font-size:11px">{{ item.webauthn_challenge }}</code>
+          </div>
+          <div class="nd-meta" style="margin-top:10px;color:var(--text)">
+            Complete authentication on the <a href="/login" target="_blank" style="color:var(--primary)">login page</a> — your browser will prompt for Touch ID or your security key.
+          </div>
+        </div>
+      </template>
+
     </div>
   </dialog>
 </template>
@@ -104,13 +122,16 @@ interface NotifyPayload {
   push_pending?: boolean
   magic_link_url?: string
   magic_link_used?: boolean
+  webauthn_challenge?: string
+  webauthn_credential_id?: string
 }
 
 const tabs = [
-  { id: 'totp',  label: 'TOTP' },
-  { id: 'push',  label: 'Push' },
-  { id: 'sms',   label: 'SMS' },
-  { id: 'magic', label: 'Magic Links' },
+  { id: 'totp',    label: 'TOTP' },
+  { id: 'push',    label: 'Push' },
+  { id: 'sms',     label: 'SMS' },
+  { id: 'magic',   label: 'Magic Links' },
+  { id: 'webauthn', label: 'Passkeys' },
 ]
 
 const dialogEl  = ref<HTMLDialogElement | null>(null)
@@ -122,19 +143,21 @@ const isOpen    = ref(false)
 let pollTimer:  ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 
-const totpItems  = computed(() => items.value.filter(i => i.type === 'totp'))
-const pushItems  = computed(() => items.value.filter(i => i.type === 'push'))
-const smsItems   = computed(() => items.value.filter(i => i.type === 'sms'))
-const magicItems = computed(() => items.value.filter(i => i.type === 'magic_link'))
+const totpItems    = computed(() => items.value.filter(i => i.type === 'totp'))
+const pushItems    = computed(() => items.value.filter(i => i.type === 'push'))
+const smsItems     = computed(() => items.value.filter(i => i.type === 'sms'))
+const magicItems   = computed(() => items.value.filter(i => i.type === 'magic_link'))
+const webauthnItems = computed(() => items.value.filter(i => i.type === 'webauthn'))
 
 
 function countFor(tabId: string): number {
   switch (tabId) {
-    case 'totp':  return totpItems.value.length
-    case 'push':  return pushItems.value.length
-    case 'sms':   return smsItems.value.length
-    case 'magic': return magicItems.value.length
-    default:      return 0
+    case 'totp':    return totpItems.value.length
+    case 'push':    return pushItems.value.length
+    case 'sms':     return smsItems.value.length
+    case 'magic':   return magicItems.value.length
+    case 'webauthn': return webauthnItems.value.length
+    default:        return 0
   }
 }
 
@@ -192,6 +215,7 @@ async function deny(item: NotifyPayload) {
   await fetch(`/api/v1/flows/${item.flow_id}/deny`, { method: 'POST' })
   await load()
 }
+
 
 onMounted(() => {
   // Initial lightweight fetch so the badge count is available immediately

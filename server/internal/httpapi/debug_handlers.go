@@ -78,28 +78,57 @@ type ClaimDiff struct {
 }
 
 // diffClaims compares two claim maps and returns a list of differences.
+// Nested objects are traversed recursively; paths use dot notation (e.g. "address.street_address").
 func diffClaims(furnace, provider map[string]any) []ClaimDiff {
 	var diffs []ClaimDiff
+	diffClaimsAt("", furnace, provider, &diffs)
+	if diffs == nil {
+		diffs = []ClaimDiff{}
+	}
+	return diffs
+}
+
+func diffClaimsAt(prefix string, furnace, provider map[string]any, diffs *[]ClaimDiff) {
 	seen := make(map[string]bool)
 
 	for k, av := range furnace {
 		seen[k] = true
+		path := claimPath(prefix, k)
 		pv, ok := provider[k]
 		if !ok {
-			diffs = append(diffs, ClaimDiff{
-				Path:           k,
-				FurnaceValue: av,
-				ProviderValue:  nil,
-				Note:           "present in furnace token, missing in provider token",
+			*diffs = append(*diffs, ClaimDiff{
+				Path:          path,
+				FurnaceValue:  av,
+				ProviderValue: nil,
+				Note:          "present in furnace token, missing in provider token",
 			})
 			continue
 		}
-		if fmt.Sprintf("%v", av) != fmt.Sprintf("%v", pv) {
-			diffs = append(diffs, ClaimDiff{
-				Path:           k,
-				FurnaceValue: av,
-				ProviderValue:  pv,
-				Note:           "values differ",
+
+		aMap, aIsMap := av.(map[string]any)
+		pMap, pIsMap := pv.(map[string]any)
+		if aIsMap && pIsMap {
+			diffClaimsAt(path, aMap, pMap, diffs)
+			continue
+		}
+
+		at, pt := jsonTypeName(av), jsonTypeName(pv)
+		if at != pt {
+			*diffs = append(*diffs, ClaimDiff{
+				Path:          path,
+				FurnaceValue:  av,
+				ProviderValue: pv,
+				Note:          fmt.Sprintf("type mismatch: furnace has %s, provider has %s", at, pt),
+			})
+			continue
+		}
+
+		if !jsonEqual(av, pv) {
+			*diffs = append(*diffs, ClaimDiff{
+				Path:          path,
+				FurnaceValue:  av,
+				ProviderValue: pv,
+				Note:          "values differ",
 			})
 		}
 	}
@@ -108,18 +137,47 @@ func diffClaims(furnace, provider map[string]any) []ClaimDiff {
 		if seen[k] {
 			continue
 		}
-		diffs = append(diffs, ClaimDiff{
-			Path:           k,
-			FurnaceValue: nil,
-			ProviderValue:  pv,
-			Note:           "missing in furnace token, present in provider token",
+		*diffs = append(*diffs, ClaimDiff{
+			Path:          claimPath(prefix, k),
+			FurnaceValue:  nil,
+			ProviderValue: pv,
+			Note:          "missing in furnace token, present in provider token",
 		})
 	}
+}
 
-	if diffs == nil {
-		diffs = []ClaimDiff{}
+func claimPath(prefix, key string) string {
+	if prefix == "" {
+		return key
 	}
-	return diffs
+	return prefix + "." + key
+}
+
+// jsonTypeName returns the JSON type name for a Go value decoded from JSON.
+func jsonTypeName(v any) string {
+	switch v.(type) {
+	case string:
+		return "string"
+	case float64:
+		return "number"
+	case bool:
+		return "boolean"
+	case []any:
+		return "array"
+	case map[string]any:
+		return "object"
+	case nil:
+		return "null"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
+}
+
+// jsonEqual compares two JSON-decoded values by re-marshaling them.
+func jsonEqual(a, b any) bool {
+	aj, _ := json.Marshal(a)
+	bj, _ := json.Marshal(b)
+	return string(aj) == string(bj)
 }
 
 // decodeJWTClaims decodes the claims from a JWT without verifying the signature.

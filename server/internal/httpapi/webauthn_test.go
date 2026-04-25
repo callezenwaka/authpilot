@@ -76,9 +76,9 @@ func TestSelectUser_WebAuthn_GoesToWebAuthnPending(t *testing.T) {
 	}
 }
 
-func TestWebAuthnResponse_AdvancesToMFAApproved(t *testing.T) {
-	router, flows, _ := newWebAuthnTestDeps()
-
+// advanceToWebAuthnPending is a helper that creates a flow and advances it to webauthn_pending.
+func advanceToWebAuthnPending(t *testing.T, router http.Handler) string {
+	t.Helper()
 	flowReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows", nil)
 	flowRec := httptest.NewRecorder()
 	router.ServeHTTP(flowRec, flowReq)
@@ -86,27 +86,68 @@ func TestWebAuthnResponse_AdvancesToMFAApproved(t *testing.T) {
 	decodeJSON(t, flowRec, &flow)
 	flowID := flow["id"].(string)
 
-	selectReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows/"+flowID+"/select-user",
+	selReq := httptest.NewRequest(http.MethodPost, "/api/v1/flows/"+flowID+"/select-user",
 		strings.NewReader(`{"user_id":"usr_wa"}`))
-	selectReq.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(httptest.NewRecorder(), selectReq)
+	selReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(httptest.NewRecorder(), selReq)
+	return flowID
+}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/flows/"+flowID+"/webauthn-response", nil)
+func TestWebAuthnBeginRegister_ReturnsChallenge(t *testing.T) {
+	router, _, _ := newWebAuthnTestDeps()
+	flowID := advanceToWebAuthnPending(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/flows/"+flowID+"/webauthn-begin-register", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("webauthn-response: want 200, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("begin-register: want 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var updated map[string]any
-	decodeJSON(t, rec, &updated)
-	if updated["state"] != "mfa_approved" {
-		t.Errorf("state: want mfa_approved, got %v", updated["state"])
+	var opts map[string]any
+	decodeJSON(t, rec, &opts)
+	pk, ok := opts["publicKey"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected publicKey in response, got %T", opts["publicKey"])
 	}
+	if pk["challenge"] == "" || pk["challenge"] == nil {
+		t.Error("expected non-empty challenge in publicKey")
+	}
+}
+
+func TestWebAuthnBeginRegister_StoresSessionOnFlow(t *testing.T) {
+	router, flows, _ := newWebAuthnTestDeps()
+	flowID := advanceToWebAuthnPending(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/flows/"+flowID+"/webauthn-begin-register", nil)
+	req.Host = "localhost"
+	router.ServeHTTP(httptest.NewRecorder(), req)
 
 	stored, _ := flows.GetByID(flowID)
-	if stored.State != "mfa_approved" {
-		t.Errorf("stored state: want mfa_approved, got %q", stored.State)
+	if stored.WebAuthnSession == "" {
+		t.Error("expected WebAuthnSession to be stored on flow after begin-register")
+	}
+}
+
+func TestWebAuthnResponse_NoSession_Returns409(t *testing.T) {
+	router, _, _ := newWebAuthnTestDeps()
+	flowID := advanceToWebAuthnPending(t, router)
+
+	// POST webauthn-response without calling begin first — must be rejected.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/flows/"+flowID+"/webauthn-response", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("want 409 NO_SESSION, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	decodeJSON(t, rec, &body)
+	if errObj, ok := body["error"].(map[string]any); ok {
+		if errObj["code"] != "NO_SESSION" {
+			t.Errorf("want code NO_SESSION, got %v", errObj["code"])
+		}
 	}
 }
 

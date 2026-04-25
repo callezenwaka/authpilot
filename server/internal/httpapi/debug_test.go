@@ -181,3 +181,65 @@ func TestDiffClaims_ValueDiffers(t *testing.T) {
 		t.Fatalf("expected note 'values differ', got %s", diffs[0].Note)
 	}
 }
+
+func TestDiffClaims_NestedValueDiffers(t *testing.T) {
+	furnace := map[string]any{
+		"address": map[string]any{"street_address": "123 Main St", "city": "Springfield"},
+	}
+	provider := map[string]any{
+		"address": map[string]any{"street_address": "456 Oak Ave", "city": "Springfield"},
+	}
+	diffs := diffClaims(furnace, provider)
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d: %v", len(diffs), diffs)
+	}
+	if diffs[0].Path != "address.street_address" {
+		t.Fatalf("expected path=address.street_address, got %s", diffs[0].Path)
+	}
+	if diffs[0].Note != "values differ" {
+		t.Fatalf("expected note 'values differ', got %s", diffs[0].Note)
+	}
+}
+
+func TestDiffClaims_NestedKeyMissing(t *testing.T) {
+	furnace := map[string]any{
+		"address": map[string]any{"street_address": "123 Main St", "postal_code": "12345"},
+	}
+	provider := map[string]any{
+		"address": map[string]any{"street_address": "123 Main St"},
+	}
+	diffs := diffClaims(furnace, provider)
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d: %v", len(diffs), diffs)
+	}
+	if diffs[0].Path != "address.postal_code" {
+		t.Fatalf("expected path=address.postal_code, got %s", diffs[0].Path)
+	}
+}
+
+func TestDiffClaims_TypeMismatch_StringVsArray(t *testing.T) {
+	furnace := map[string]any{"roles": "admin"}
+	provider := map[string]any{"roles": []any{"admin", "user"}}
+	diffs := diffClaims(furnace, provider)
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d: %v", len(diffs), diffs)
+	}
+	if diffs[0].Path != "roles" {
+		t.Fatalf("expected path=roles, got %s", diffs[0].Path)
+	}
+	if diffs[0].Note != "type mismatch: furnace has string, provider has array" {
+		t.Fatalf("unexpected note: %s", diffs[0].Note)
+	}
+}
+
+func TestDiffClaims_TypeMismatch_NumberVsString(t *testing.T) {
+	furnace := map[string]any{"exp": float64(1700000000)}
+	provider := map[string]any{"exp": "1700000000"}
+	diffs := diffClaims(furnace, provider)
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d: %v", len(diffs), diffs)
+	}
+	if diffs[0].Note != "type mismatch: furnace has number, provider has string" {
+		t.Fatalf("unexpected note: %s", diffs[0].Note)
+	}
+}

@@ -25,18 +25,20 @@ type flowMutationRequest struct {
 }
 
 type loginViewData struct {
-	FlowID   string
-	Flow     domain.Flow
-	Users    []domain.User
-	User     domain.User
-	Error    string
-	HasError bool
+	FlowID               string
+	Flow                 domain.Flow
+	Users                []domain.User
+	User                 domain.User
+	Error                string
+	HasError             bool
+	HasWebAuthnCredential bool
 }
 
 var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
 <html>
 <head>
 <meta charset="utf-8"><title>Furnace Login</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='7' y='24' font-size='20' font-weight='700' font-family='system-ui,sans-serif' fill='white'%3EF%3C/text%3E%3C/svg%3E">
 <style>
   *,*::before,*::after{box-sizing:border-box}
   body{margin:0;background:#f5f6fa;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}
@@ -82,6 +84,7 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
 var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Furnace MFA</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='7' y='24' font-size='20' font-weight='700' font-family='system-ui,sans-serif' fill='white'%3EF%3C/text%3E%3C/svg%3E">
 <style>
   body{font-family:system-ui,sans-serif;max-width:440px;margin:60px auto;padding:0 20px;color:#111}
   h1{font-size:1.4rem;margin-bottom:4px}
@@ -103,18 +106,49 @@ var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
   {{if .HasError}}<p class="err">{{.Error}}</p>{{end}}
 
   {{if eq .Flow.State "webauthn_pending"}}
-    <p>Authenticate with your passkey or security key.</p>
-    <p class="waiting">Challenge: <code>{{.Flow.WebAuthnChallenge}}</code></p>
-    <form method="post" action="/api/v1/flows/{{.FlowID}}/webauthn-response">
-      <button type="submit">Authenticate (Simulate)</button>
-    </form>
-    <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
+    <p>{{if .HasWebAuthnCredential}}Authenticate with your registered passkey.{{else}}Register a passkey to continue.{{end}}</p>
+    <p id="wa-err" style="color:#dc2626;font-size:13px;margin-bottom:8px"></p>
+    <button id="wa-btn" class="btn" onclick="doWebAuthn()">
+      {{if .HasWebAuthnCredential}}Authenticate with passkey{{else}}Register &amp; authenticate{{end}}
+    </button>
+    <a class="hub-link" href="/admin" target="_blank">→ Open admin panel</a>
+    <script>
+      function b64url(buf){return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')}
+      function fromB64url(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';return Uint8Array.from(atob(s),c=>c.charCodeAt(0)).buffer}
+      function prepCreate(o){o.publicKey.challenge=fromB64url(o.publicKey.challenge);o.publicKey.user.id=fromB64url(o.publicKey.user.id);if(o.publicKey.excludeCredentials)o.publicKey.excludeCredentials=o.publicKey.excludeCredentials.map(c=>({...c,id:fromB64url(c.id)}));return o}
+      function prepGet(o){o.publicKey.challenge=fromB64url(o.publicKey.challenge);if(o.publicKey.allowCredentials)o.publicKey.allowCredentials=o.publicKey.allowCredentials.map(c=>({...c,id:fromB64url(c.id)}));return o}
+      function credJSON(c){const rsp={clientDataJSON:b64url(c.response.clientDataJSON)};if(c.response.attestationObject)rsp.attestationObject=b64url(c.response.attestationObject);if(c.response.authenticatorData)rsp.authenticatorData=b64url(c.response.authenticatorData);if(c.response.signature)rsp.signature=b64url(c.response.signature);if(c.response.userHandle)rsp.userHandle=b64url(c.response.userHandle);return{id:c.id,rawId:b64url(c.rawId),type:c.type,response:rsp}}
+      const flowId="{{.FlowID}}";
+      const hasCred={{if .HasWebAuthnCredential}}true{{else}}false{{end}};
+      async function doWebAuthn(){
+        const btn=document.getElementById('wa-btn'),err=document.getElementById('wa-err');
+        btn.disabled=true;err.textContent='';
+        try{
+          if(!hasCred){
+            btn.textContent='Registering passkey…';
+            const ro=await fetch('/api/v1/flows/'+flowId+'/webauthn-begin-register').then(r=>r.json());
+            const rc=await navigator.credentials.create(prepCreate(ro));
+            const rr=await fetch('/api/v1/flows/'+flowId+'/webauthn-finish-register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(credJSON(rc))});
+            if(!rr.ok){const e=await rr.json();throw new Error(e.error||'Registration failed')}
+          }
+          btn.textContent='Authenticating…';
+          const ao=await fetch('/api/v1/flows/'+flowId+'/webauthn-begin').then(r=>r.json());
+          const ac=await navigator.credentials.get(prepGet(ao));
+          const ar=await fetch('/api/v1/flows/'+flowId+'/webauthn-response',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(credJSON(ac))});
+          if(!ar.ok){const e=await ar.json();throw new Error(e.error||'Authentication failed')}
+          window.location.href='/login/mfa?flow_id='+flowId;
+        }catch(e){
+          err.textContent=e.message;btn.disabled=false;
+          btn.textContent=hasCred?'Authenticate with passkey':'Register & authenticate';
+        }
+      }
+    </script>
   {{else if eq .User.MFAMethod "push"}}
     <div class="spinner"></div>
     <p class="waiting">Waiting for push approval on your device…</p>
     <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
     <script>
-      const flowId = {{printf "%q" .FlowID}};
+      const flowId = "{{.FlowID}}";
       setInterval(async () => {
         const res = await fetch('/api/v1/flows/' + flowId);
         if (!res.ok) return;
@@ -129,7 +163,7 @@ var mfaTemplate = template.Must(template.New("mfa").Parse(`<!doctype html>
     <p class="waiting">Click the link in your email to continue.</p>
     <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
     <script>
-      const flowId = {{printf "%q" .FlowID}};
+      const flowId = "{{.FlowID}}";
       setInterval(async () => {
         const res = await fetch('/api/v1/flows/' + flowId);
         if (!res.ok) return;
@@ -161,6 +195,7 @@ var completeTemplate = template.Must(template.New("complete").Parse(`<!doctype h
 <html>
 <head>
 <meta charset="utf-8"><title>Furnace Complete</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='7' y='24' font-size='20' font-weight='700' font-family='system-ui,sans-serif' fill='white'%3EF%3C/text%3E%3C/svg%3E">
 <style>
   *,*::before,*::after{box-sizing:border-box}
   body{margin:0;background:#f5f6fa;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}
@@ -405,7 +440,12 @@ func loginMFAHandler(flows store.FlowStore, users store.UserStore) http.HandlerF
 		}
 		user, _ := users.GetByID(flow.UserID)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = mfaTemplate.Execute(w, loginViewData{FlowID: flowID, Flow: flow, User: user})
+		_ = mfaTemplate.Execute(w, loginViewData{
+			FlowID:                flowID,
+			Flow:                  flow,
+			User:                  user,
+			HasWebAuthnCredential: user.WebAuthnCredentials != "",
+		})
 	}
 }
 
@@ -575,41 +615,6 @@ func applyVerifyMFA(flows store.FlowStore, users store.UserStore, flowID, code, 
 	return updated, 0, "", ""
 }
 
-func webauthnResponseHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		flowID := mux.Vars(r)["id"]
-		flow, err := flows.GetByID(flowID)
-		if err != nil {
-			writeError(w, http.StatusNotFound, "not_found", "flow not found")
-			return
-		}
-		if flow.State != string(flowengine.StateWebAuthnPending) {
-			writeError(w, http.StatusConflict, "STATE_TRANSITION_INVALID", "flow is not awaiting WebAuthn response")
-			return
-		}
-		if !flowengine.CanTransition(flowengine.StateWebAuthnPending, flowengine.StateMFAApproved) {
-			writeError(w, http.StatusConflict, "STATE_TRANSITION_INVALID", "invalid flow transition")
-			return
-		}
-		flow.State = string(flowengine.StateMFAApproved)
-		updated, err := flows.Update(flow)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "update_flow_failed", err.Error())
-			return
-		}
-		if user, err := users.GetByID(updated.UserID); err == nil {
-			if flowengine.NormalizeScenario(updated.Scenario) != flowengine.ScenarioNormal {
-				user.NextFlow = string(flowengine.ScenarioNormal)
-				_, _ = users.Update(user)
-			}
-		}
-		audit.Emit(as, audit.EventFlowComplete, updated.UserID, updated.ID, map[string]any{
-			"protocol": updated.Protocol,
-			"method":   "webauthn",
-		})
-		writeJSON(w, http.StatusOK, updated)
-	}
-}
 
 func approveOrDenyFlow(flows store.FlowStore, users store.UserStore, flowID string, approve bool, expectedState string) (domain.Flow, int, string, string) {
 	flow, err := flows.GetByID(flowID)

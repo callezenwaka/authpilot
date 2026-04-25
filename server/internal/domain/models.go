@@ -13,16 +13,17 @@ type AuditEvent struct {
 }
 
 type User struct {
-	ID          string         `json:"id"`
-	Email       string         `json:"email"`
-	DisplayName string         `json:"display_name"`
-	Groups      []string       `json:"groups"`
-	MFAMethod   string         `json:"mfa_method"`
-	NextFlow    string         `json:"next_flow"`
-	Active      bool           `json:"active"`
-	Claims      map[string]any `json:"claims,omitempty"`
-	PhoneNumber string         `json:"phone_number,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
+	ID                  string         `json:"id"`
+	Email               string         `json:"email"`
+	DisplayName         string         `json:"display_name"`
+	Groups              []string       `json:"groups"`
+	MFAMethod           string         `json:"mfa_method"`
+	NextFlow            string         `json:"next_flow"`
+	Active              bool           `json:"active"`
+	Claims              map[string]any `json:"claims,omitempty"`
+	PhoneNumber         string         `json:"phone_number,omitempty"`
+	WebAuthnCredentials string         `json:"-"` // JSON-encoded []webauthn.Credential; not exposed in API
+	CreatedAt           time.Time      `json:"created_at"`
 }
 
 type Group struct {
@@ -61,7 +62,8 @@ type Flow struct {
 	SMSCode           string `json:"-"`                           // 6-digit code for SMS method
 	MagicLinkToken    string `json:"-"`                           // opaque token for magic link
 	MagicLinkUsed     bool   `json:"magic_link_used,omitempty"`
-	WebAuthnChallenge string `json:"webauthn_challenge,omitempty"` // base64url challenge for WebAuthn simulation
+	WebAuthnChallenge string `json:"webauthn_challenge,omitempty"` // base64url challenge (kept for notify hub display)
+	WebAuthnSession   string `json:"-"`                           // JSON-encoded webauthn.SessionData between begin and finish
 }
 
 type SessionEvent struct {

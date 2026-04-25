@@ -73,7 +73,6 @@ func TestExportSCIM(t *testing.T) {
 	if resp.TotalResults != 2 {
 		t.Errorf("TotalResults = %d, want 2", resp.TotalResults)
 	}
-	// First user should have a group ref.
 	found := false
 	for _, u := range resp.Resources {
 		if u.UserName == "alice@example.com" {
@@ -81,13 +80,40 @@ func TestExportSCIM(t *testing.T) {
 			if len(u.Groups) != 1 || u.Groups[0].Value != "g1" {
 				t.Errorf("alice group ref = %+v, want [{g1 Engineering}]", u.Groups)
 			}
-			if !u.Active {
-				t.Error("expected Active=true")
+			// RFC 7643 §4.1.1 name attribute
+			if u.Name.GivenName != "Alice" {
+				t.Errorf("name.givenName = %q, want Alice", u.Name.GivenName)
+			}
+			if u.Name.FamilyName != "Smith" {
+				t.Errorf("name.familyName = %q, want Smith", u.Name.FamilyName)
+			}
+			if u.Name.Formatted != "Alice Smith" {
+				t.Errorf("name.formatted = %q, want Alice Smith", u.Name.Formatted)
+			}
+			// active reflects the user's actual Active field (false in test fixture)
+			if u.Active {
+				t.Error("expected Active=false for inactive test user")
 			}
 		}
 	}
 	if !found {
 		t.Error("alice not found in SCIM output")
+	}
+}
+
+func TestExportSCIM_Schema(t *testing.T) {
+	data, _ := Users(testUsers, testGroups, FormatSCIM)
+	var resp scimListResponse
+	json.Unmarshal(data, &resp)
+	wantListSchema := "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+	if len(resp.Schemas) == 0 || resp.Schemas[0] != wantListSchema {
+		t.Errorf("list schemas = %v, want [%s]", resp.Schemas, wantListSchema)
+	}
+	wantUserSchema := "urn:ietf:params:scim:schemas:core:2.0:User"
+	for _, u := range resp.Resources {
+		if len(u.Schemas) == 0 || u.Schemas[0] != wantUserSchema {
+			t.Errorf("user %q schemas = %v, want [%s]", u.UserName, u.Schemas, wantUserSchema)
+		}
 	}
 }
 
@@ -123,11 +149,23 @@ func TestExportAzure(t *testing.T) {
 	if len(out.Groups) != 1 {
 		t.Errorf("Groups count = %d, want 1", len(out.Groups))
 	}
-	if out.Users[0].UserPrincipalName != "alice@example.com" {
-		t.Errorf("first user UPN = %q, want alice@example.com", out.Users[0].UserPrincipalName)
+	alice := out.Users[0]
+	if alice.UserPrincipalName != "alice@example.com" {
+		t.Errorf("UPN = %q, want alice@example.com", alice.UserPrincipalName)
 	}
-	if !out.Users[0].AccountEnabled {
-		t.Error("expected AccountEnabled=true")
+	// Graph API required fields
+	if alice.PasswordProfile.Password == "" {
+		t.Error("passwordProfile.password must not be empty")
+	}
+	if !alice.PasswordProfile.ForceChangePasswordNextSignIn {
+		t.Error("expected forceChangePasswordNextSignIn=true")
+	}
+	// givenName / surname for Graph API
+	if alice.GivenName != "Alice" {
+		t.Errorf("givenName = %q, want Alice", alice.GivenName)
+	}
+	if alice.Surname != "Smith" {
+		t.Errorf("surname = %q, want Smith", alice.Surname)
 	}
 }
 
@@ -142,6 +180,14 @@ func TestExportGoogle(t *testing.T) {
 	}
 	if !strings.Contains(s, "alice@example.com") {
 		t.Error("expected alice in Google CSV")
+	}
+	// Change Password at Next Sign-In must be TRUE (required for new accounts)
+	if !strings.Contains(s, "TRUE") {
+		t.Error("expected Change Password at Next Sign-In = TRUE")
+	}
+	// Phone number should be populated for users who have one
+	if !strings.Contains(s, "+15551234567") {
+		t.Error("expected alice's phone number in Mobile Phone column")
 	}
 }
 
