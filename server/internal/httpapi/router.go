@@ -93,6 +93,9 @@ type Dependencies struct {
 	// ProtocolURL is the base URL of the protocol server (e.g. "http://localhost:18026").
 	// Exposed via GET /api/v1/config so the admin SPA can build correct endpoint URLs.
 	ProtocolURL    string
+	// Readiness, if non-nil, is called by GET /ready to check store connectivity.
+	// nil = always ready (memory store).
+	Readiness      func() error
 }
 
 // resolveStores returns the correct store set for the request context.
@@ -109,10 +112,13 @@ func (d *Dependencies) resolveStores(ctx context.Context) (store.UserStore, stor
 func NewRouter(dep Dependencies) http.Handler {
 	r := mux.NewRouter()
 	r.Use(requestIDMiddleware)
+	r.Use(instrumentMiddleware)
 
 	registerAdminRoutes(r, dep.AdminStaticDir, dep.AdminFS)
 
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
+	r.HandleFunc("/ready", readyHandler(dep.Readiness)).Methods(http.MethodGet)
+	r.Handle("/metrics", metricsHandler()).Methods(http.MethodGet)
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
 		loginPageHandler(flows, users)(w, r)
@@ -447,6 +453,21 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 		"status": "ok",
 		"time":   time.Now().UTC(),
 	})
+}
+
+func readyHandler(readiness func() error) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if readiness != nil {
+			if err := readiness(); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+					"status": "not_ready",
+					"error":  err.Error(),
+				})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
+	}
 }
 
 func listUsersHandler(users store.UserStore) http.HandlerFunc {

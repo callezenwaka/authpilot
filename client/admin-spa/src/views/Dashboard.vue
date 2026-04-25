@@ -54,6 +54,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
 
 interface Session {
@@ -68,10 +69,10 @@ const recentSessions = ref<Session[]>([])
 
 async function load() {
   const [users, groups, flows, sessions] = await Promise.all([
-    fetch('/api/v1/users').then(r => r.json()),
-    fetch('/api/v1/groups').then(r => r.json()),
-    fetch('/api/v1/flows').then(r => r.json()),
-    fetch('/api/v1/sessions').then(r => r.json()),
+    apiFetch('/api/v1/users').then(r => r.json()),
+    apiFetch('/api/v1/groups').then(r => r.json()),
+    apiFetch('/api/v1/flows').then(r => r.json()),
+    apiFetch('/api/v1/sessions').then(r => r.json()),
   ])
   stats.value.users = Array.isArray(users) ? users.length : 0
   stats.value.groups = Array.isArray(groups) ? groups.length : 0

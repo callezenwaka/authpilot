@@ -68,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
 
 interface TTLs {
@@ -100,7 +101,7 @@ const personalities: Personality[] = [
 
 async function loadConfig() {
   try {
-    const res = await fetch('/api/v1/config')
+    const res = await apiFetch('/api/v1/config')
     if (!res.ok) throw new Error(`${res.status}`)
     const data = await res.json()
     ttls.value = {
@@ -123,7 +124,7 @@ async function saveTTLs() {
     if (ttls.value.access_token_ttl != null)  body.tokens.access_token_ttl  = ttls.value.access_token_ttl
     if (ttls.value.id_token_ttl != null)      body.tokens.id_token_ttl      = ttls.value.id_token_ttl
     if (ttls.value.refresh_token_ttl != null) body.tokens.refresh_token_ttl = ttls.value.refresh_token_ttl
-    const res = await fetch('/api/v1/config', {
+    const res = await apiFetch('/api/v1/config', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

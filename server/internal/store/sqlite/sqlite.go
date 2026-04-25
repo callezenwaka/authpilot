@@ -31,6 +31,10 @@ func New(path string) (*Store, error) {
 	return store, nil
 }
 
+func (s *Store) Ping() error {
+	return s.db.Ping()
+}
+
 func (s *Store) Close() error {
 	return s.db.Close()
 }

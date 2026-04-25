@@ -50,17 +50,19 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	var flows store.FlowStore
 	var sessions store.SessionStore
+	var readiness func() error
 
 	if cfg.Persistence.Enabled {
-		sqlite, err := sqliteStore.New(cfg.Persistence.SQLitePath)
+		sq, err := sqliteStore.New(cfg.Persistence.SQLitePath)
 		if err != nil {
 			return nil, fmt.Errorf("initialize sqlite persistence: %w", err)
 		}
-		users = sqlite.Users()
-		groups = sqlite.Groups()
-		flows = sqlite.Flows()
-		sessions = sqlite.Sessions()
-		closers = append(closers, sqlite.Close)
+		users = sq.Users()
+		groups = sq.Groups()
+		flows = sq.Flows()
+		sessions = sq.Sessions()
+		closers = append(closers, sq.Close)
+		readiness = sq.Ping
 	} else {
 		users = memory.NewUserStore()
 		groups = memory.NewGroupStore()
@@ -134,6 +136,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		SCIMClient:    scimCl,
 		SCIMEvents:    scimEventStore,
 		AdminFS:       web.AdminFS,
+		Readiness:     readiness,
 	})
 
 	httpServer := &http.Server{

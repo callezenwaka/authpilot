@@ -59,6 +59,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
 
 interface Session {
@@ -73,7 +74,7 @@ const sessions = ref<Session[]>([])
 const expanded = ref<string | null>(null)
 
 async function load() {
-  const res = await fetch('/api/v1/sessions')
+  const res = await apiFetch('/api/v1/sessions')
   sessions.value = await res.json()
 }
 

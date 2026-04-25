@@ -68,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
 
 interface AuditEvent {
@@ -96,7 +97,7 @@ async function load() {
     if (filterType.value) params.set('event_type', filterType.value)
     if (filterSince.value) params.set('since', new Date(filterSince.value).toISOString())
     const qs = params.toString() ? '?' + params.toString() : ''
-    const res = await fetch('/api/v1/audit' + qs)
+    const res = await apiFetch('/api/v1/audit' + qs)
     if (!res.ok) throw new Error('fetch failed')
     events.value = await res.json()
   } catch {

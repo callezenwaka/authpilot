@@ -76,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
 
 interface Group {
@@ -92,7 +93,7 @@ const memberText = ref('')
 const modalError = ref('')
 
 async function load() {
-  const res = await fetch('/api/v1/groups')
+  const res = await apiFetch('/api/v1/groups')
   groups.value = await res.json()
 }
 
@@ -118,7 +119,7 @@ async function saveGroup() {
   g.member_ids = memberText.value.split('\n').map(s => s.trim()).filter(Boolean)
 
   const isNew = !editingId.value
-  const res = await fetch(isNew ? '/api/v1/groups' : `/api/v1/groups/${editingId.value}`, {
+  const res = await apiFetch(isNew ? '/api/v1/groups' : `/api/v1/groups/${editingId.value}`, {
     method: isNew ? 'POST' : 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(g),
@@ -135,7 +136,7 @@ async function saveGroup() {
 
 async function deleteGroup(g: Group) {
   if (!confirm(`Delete group "${g.display_name || g.id}"?`)) return
-  await fetch(`/api/v1/groups/${g.id}`, { method: 'DELETE' })
+  await apiFetch(`/api/v1/groups/${g.id}`, { method: 'DELETE' })
   await load()
 }
 

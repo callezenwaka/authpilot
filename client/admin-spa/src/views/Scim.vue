@@ -178,6 +178,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
 
 interface SCIMUser {
@@ -224,7 +225,7 @@ async function loadUsers() {
     const url = filter.value.trim()
       ? `/scim/v2/Users?filter=${encodeURIComponent(`userName eq "${filter.value.trim()}"`)}`
       : '/scim/v2/Users'
-    const res = await fetch(url, { headers: { Accept: 'application/scim+json' } })
+    const res = await apiFetch(url, { headers: { Accept: 'application/scim+json' } })
     if (!res.ok) throw new Error(`SCIM ${res.status}`)
     const data = await res.json()
     scimUsers.value = Array.isArray(data.Resources) ? data.Resources : []
@@ -238,7 +239,7 @@ async function loadUsers() {
 async function loadGroups() {
   groupsLoading.value = true
   try {
-    const res = await fetch('/scim/v2/Groups', { headers: { Accept: 'application/scim+json' } })
+    const res = await apiFetch('/scim/v2/Groups', { headers: { Accept: 'application/scim+json' } })
     if (!res.ok) throw new Error(`SCIM ${res.status}`)
     const data = await res.json()
     scimGroups.value = Array.isArray(data.Resources) ? data.Resources : []
@@ -251,7 +252,7 @@ async function loadGroups() {
 
 async function loadSPC() {
   try {
-    const res = await fetch('/scim/v2/ServiceProviderConfig', { headers: { Accept: 'application/scim+json' } })
+    const res = await apiFetch('/scim/v2/ServiceProviderConfig', { headers: { Accept: 'application/scim+json' } })
     if (!res.ok) return
     spcJSON.value = JSON.stringify(await res.json(), null, 2)
   } catch { /* ignore */ }
@@ -261,7 +262,7 @@ async function loadEvents() {
   eventsLoading.value = true
   eventsDisabled.value = false
   try {
-    const res = await fetch('/api/v1/scim/events')
+    const res = await apiFetch('/api/v1/scim/events')
     if (res.status === 501) { eventsDisabled.value = true; scimEvents.value = []; return }
     if (!res.ok) throw new Error(`${res.status}`)
     scimEvents.value = await res.json()

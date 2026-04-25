@@ -65,6 +65,7 @@
             <span v-if="notifyCount > 0" class="bell-badge">{{ notifyCount }}</span>
           </button>
           <a href="/login" style="font-size:12px;color:var(--text-muted);text-decoration:none">Login Simulator →</a>
+          <button v-if="oidcEnabled" class="signout-btn" @click="signOut" title="Sign out">Sign out</button>
         </div>
       </header>
       <router-view />
@@ -75,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch, oidcEnabled, userManager } from './auth'
 import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import NotifyDialog from './components/NotifyDialog.vue'
@@ -92,7 +94,7 @@ let badgePoll: ReturnType<typeof setInterval>
 
 async function fetchBadgeCount() {
   try {
-    const res = await fetch('/api/v1/notifications/all')
+    const res = await apiFetch('/api/v1/notifications/all')
     if (res.ok) {
       const items = await res.json()
       notifyCount.value = Array.isArray(items) ? items.length : 0
@@ -104,6 +106,10 @@ async function loadTenants() {
   try {
     tenants.value = []
   } catch { /* ignore */ }
+}
+
+async function signOut() {
+  await userManager?.signoutRedirect()
 }
 
 const pageTitle = computed(() => {
@@ -197,4 +203,16 @@ onUnmounted(() => clearInterval(badgePoll))
   color: #fff;
   line-height: 1;
 }
+
+.signout-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.signout-btn:hover { background: var(--bg); color: var(--text); }
 </style>

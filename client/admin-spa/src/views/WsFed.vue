@@ -118,6 +118,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
 
 const metadataXML = ref('')
@@ -126,7 +127,7 @@ const protocolURL = ref('http://localhost:8026')
 
 async function loadProtocolURL() {
   try {
-    const res = await fetch('/api/v1/config')
+    const res = await apiFetch('/api/v1/config')
     const cfg = await res.json()
     if (cfg.protocol_url) protocolURL.value = cfg.protocol_url
   } catch { /* keep default */ }
@@ -136,7 +137,7 @@ async function loadMetadata() {
   metaStatus.value = 'checking'
   metadataXML.value = ''
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `${protocolURL.value}/federationmetadata/2007-06/federationmetadata.xml`,
       { signal: AbortSignal.timeout(3000) }
     )

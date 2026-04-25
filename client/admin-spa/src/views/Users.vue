@@ -104,6 +104,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, computed, onMounted } from 'vue'
 
 interface User {
@@ -130,7 +131,7 @@ const filtered = computed(() => {
 })
 
 async function load() {
-  const res = await fetch('/api/v1/users')
+  const res = await apiFetch('/api/v1/users')
   users.value = await res.json()
 }
 
@@ -154,13 +155,13 @@ async function saveUser() {
   let res: Response
   if (isNew) {
     const id = 'usr_' + Date.now()
-    res = await fetch('/api/v1/users', {
+    res = await apiFetch('/api/v1/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...u, id }),
     })
   } else {
-    res = await fetch(`/api/v1/users/${u.id}`, {
+    res = await apiFetch(`/api/v1/users/${u.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(u),
@@ -178,7 +179,7 @@ async function saveUser() {
 
 async function deleteUser(u: User) {
   if (!confirm(`Delete ${u.email}?`)) return
-  await fetch(`/api/v1/users/${u.id}`, { method: 'DELETE' })
+  await apiFetch(`/api/v1/users/${u.id}`, { method: 'DELETE' })
   await load()
 }
 

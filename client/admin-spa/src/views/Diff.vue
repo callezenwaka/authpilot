@@ -94,6 +94,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref } from 'vue'
 
 interface ClaimDiff {
@@ -129,7 +130,7 @@ async function compare() {
   try {
     const params = new URLSearchParams({ furnace_token: ap, provider_token: pv })
     if (flowID.value.trim()) params.set('flow_id', flowID.value.trim())
-    const res = await fetch('/api/v1/debug/token-compare?' + params.toString())
+    const res = await apiFetch('/api/v1/debug/token-compare?' + params.toString())
     const data = await res.json()
     if (!res.ok) {
       throw new Error(data?.error?.message ?? `${res.status}`)

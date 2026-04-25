@@ -108,6 +108,7 @@
 </template>
 
 <script setup lang="ts">
+import { apiFetch } from '../auth'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 interface NotifyPayload {
@@ -163,7 +164,7 @@ function countFor(tabId: string): number {
 
 async function load() {
   try {
-    const res = await fetch('/api/v1/notifications/all')
+    const res = await apiFetch('/api/v1/notifications/all')
     if (res.ok) items.value = await res.json()
   } catch { /* server unreachable during dev */ }
 }
@@ -207,12 +208,12 @@ function copy(text?: string) {
 }
 
 async function approve(item: NotifyPayload) {
-  await fetch(`/api/v1/flows/${item.flow_id}/approve`, { method: 'POST' })
+  await apiFetch(`/api/v1/flows/${item.flow_id}/approve`, { method: 'POST' })
   await load()
 }
 
 async function deny(item: NotifyPayload) {
-  await fetch(`/api/v1/flows/${item.flow_id}/deny`, { method: 'POST' })
+  await apiFetch(`/api/v1/flows/${item.flow_id}/deny`, { method: 'POST' })
   await load()
 }
 
