@@ -13,6 +13,9 @@ import (
 //go:embed templates
 var embeddedTemplates embed.FS
 
+//go:embed doc
+var embeddedDoc embed.FS
+
 //go:embed static/admin
 var embeddedAdmin embed.FS
 
@@ -57,4 +60,9 @@ func ParseTemplate(name string) (*template.Template, error) {
 		return nil, fmt.Errorf("template not found: %s", name)
 	}
 	return t, nil
+}
+
+// ReadDoc reads the named Markdown file from the embedded doc filesystem.
+func ReadDoc(name string) ([]byte, error) {
+	return embeddedDoc.ReadFile("doc/" + name)
 }

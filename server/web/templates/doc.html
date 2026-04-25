@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.Title}} — Furnace Docs</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='7' y='24' font-size='20' font-weight='700' font-family='system-ui,sans-serif' fill='white'%3EF%3C/text%3E%3C/svg%3E">
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;background:#f5f6fa}
+  /* sidebar */
+  .sidebar{width:220px;flex-shrink:0;background:#1e293b;color:#cbd5e1;display:flex;flex-direction:column;padding:0}
+  .sidebar-logo{padding:20px 20px 16px;font-weight:700;font-size:16px;color:#fff;letter-spacing:.02em;text-decoration:none;display:block}
+  .sidebar-logo span{color:#60a5fa}
+  .sidebar-section{padding:8px 12px 4px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
+  .sidebar nav{flex:1}
+  .sidebar a{display:block;padding:7px 20px;color:#94a3b8;text-decoration:none;font-size:.85rem;border-left:3px solid transparent;transition:color .15s,border-color .15s,background .15s}
+  .sidebar a:hover{color:#e2e8f0;background:rgba(255,255,255,.05)}
+  .sidebar a.active{color:#fff;border-left-color:#2563eb;background:rgba(37,99,235,.15)}
+  .sidebar-divider{border:none;border-top:1px solid #334155;margin:12px 0}
+  .sidebar-footer{padding:16px 20px;font-size:.75rem;color:#475569}
+  .sidebar-footer a{color:#60a5fa;text-decoration:none}
+  /* content */
+  .content{flex:1;overflow:auto;padding:40px 48px;max-width:860px}
+  /* markdown */
+  .prose h1{font-size:1.75rem;font-weight:700;margin:0 0 8px;color:#0f172a}
+  .prose h2{font-size:1.2rem;font-weight:700;margin:32px 0 12px;padding-bottom:6px;border-bottom:1px solid #e2e4ea;color:#1e293b}
+  .prose h3{font-size:1rem;font-weight:600;margin:24px 0 8px;color:#1e293b}
+  .prose p{margin:0 0 14px;line-height:1.65;color:#374151}
+  .prose ul,.prose ol{margin:0 0 14px;padding-left:24px;line-height:1.65;color:#374151}
+  .prose li{margin-bottom:4px}
+  .prose code{font-family:ui-monospace,monospace;font-size:.82rem;background:#f1f5f9;border:1px solid #e2e4ea;border-radius:4px;padding:1px 5px;color:#1e40af}
+  .prose pre{background:#0f172a;border-radius:6px;padding:16px 20px;overflow-x:auto;margin:0 0 16px}
+  .prose pre code{background:none;border:none;padding:0;color:#e2e8f0;font-size:.82rem}
+  .prose table{width:100%;border-collapse:collapse;margin:0 0 16px;font-size:.85rem}
+  .prose th{background:#f8fafc;text-align:left;padding:8px 12px;border:1px solid #e2e4ea;font-weight:600;color:#374151}
+  .prose td{padding:8px 12px;border:1px solid #e2e4ea;color:#374151;vertical-align:top}
+  .prose tr:nth-child(even) td{background:#fafafa}
+  .prose a{color:#2563eb;text-decoration:none}
+  .prose a:hover{text-decoration:underline}
+  .prose hr{border:none;border-top:1px solid #e2e4ea;margin:24px 0}
+  .prose blockquote{margin:0 0 14px;padding:10px 16px;border-left:3px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:0 6px 6px 0}
+</style>
+</head>
+<body>
+  <aside class="sidebar">
+    <a href="/" class="sidebar-logo">Fur<span>nace</span></a>
+    <nav>
+      <div class="sidebar-section">Docs</div>
+      <a href="/doc/onboarding"{{if eq .Slug "onboarding"}} class="active"{{end}}>Onboarding</a>
+      <a href="/doc/api-reference"{{if eq .Slug "api-reference"}} class="active"{{end}}>API Reference</a>
+      <a href="/doc/configuration"{{if eq .Slug "configuration"}} class="active"{{end}}>Configuration</a>
+      <a href="/doc/security"{{if eq .Slug "security"}} class="active"{{end}}>Security</a>
+      <a href="/doc/login-simulation"{{if eq .Slug "login-simulation"}} class="active"{{end}}>Login Simulation</a>
+    </nav>
+    <hr class="sidebar-divider">
+    <div class="sidebar-footer">
+      <a href="/admin">Admin UI</a> &nbsp;·&nbsp;
+      <a href="/api/v1/docs">API Docs</a> &nbsp;·&nbsp;
+      <a href="/login">Login</a>
+    </div>
+  </aside>
+  <main class="content">
+    <div class="prose">
+      {{.Body}}
+    </div>
+  </main>
+</body>
+</html>

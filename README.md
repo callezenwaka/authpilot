@@ -90,7 +90,7 @@ Pin a specific version by replacing `:latest` with `:v0.1.0`.
 | `FURNACE_CORS_ORIGINS` | _(none = `*`)_ | Comma-separated allowed origins |
 | `FURNACE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 
-Full variable reference: [doc/configuration.md](doc/configuration.md)
+Full variable reference: [doc/configuration.md](server/web/doc/configuration.md)
 
 ## Make Targets
 
@@ -170,11 +170,11 @@ git push origin server/v0.1.0
 
 | Doc | Contents |
 |-----|----------|
-| [doc/onboarding.md](doc/onboarding.md) | Step-by-step: create users, groups, and test a login flow |
-| [doc/api-reference.md](doc/api-reference.md) | All endpoints — OIDC, SAML, WS-Fed, SCIM, management API |
-| [doc/configuration.md](doc/configuration.md) | All environment variables, multi-tenancy, SCIM client mode |
-| [doc/security.md](doc/security.md) | API key, CSRF, CORS, network exposure |
-| [doc/login-simulation.md](doc/login-simulation.md) | Flow scenarios and MFA methods |
+| [Onboarding](server/web/doc/onboarding.md) | Step-by-step: create users, groups, and test a login flow |
+| [API Reference](server/web/doc/api-reference.md) | All endpoints — OIDC, SAML, WS-Fed, SCIM, management API |
+| [Configuration](server/web/doc/configuration.md) | All environment variables, multi-tenancy, SCIM client mode |
+| [Security](server/web/doc/security.md) | API key, CSRF, CORS, network exposure |
+| [Login Simulation](server/web/doc/login-simulation.md) | Flow scenarios and MFA methods |
 
 ## Folder Structure
 
@@ -184,8 +184,8 @@ git push origin server/v0.1.0
 │   └── admin-spa/        # Vue 3 admin SPA
 ├── server/
 │   ├── cmd/furnace/      # Binary entrypoint
-│   └── internal/         # Protocol engine, API handlers, stores
-├── doc/                  # Reference documentation
+│   ├── internal/         # Protocol engine, API handlers, stores
+│   └── web/doc/          # Markdown docs (served at /doc/*)
 ├── configs/              # Example YAML configs
 ├── deploy/
 │   └── helm/furnace/     # Helm chart

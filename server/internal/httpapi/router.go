@@ -151,6 +151,10 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.HandleFunc("/api/v1/openapi.json", openAPISpecHandler).Methods(http.MethodGet)
 	r.HandleFunc("/api/v1/docs", openAPIDocsHandler).Methods(http.MethodGet)
 
+	// Docs — public, no auth required.
+	r.HandleFunc("/doc", docIndexHandler()).Methods(http.MethodGet)
+	r.HandleFunc("/doc/{slug}", docHandler()).Methods(http.MethodGet)
+
 	api := r.PathPrefix("/api/v1").Subrouter()
 	if dep.TenantStores != nil && len(dep.TenantEntries) > 0 {
 		api.Use(tenantAPIKeyMiddleware(dep.TenantEntries))

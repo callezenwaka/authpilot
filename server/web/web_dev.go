@@ -22,3 +22,9 @@ func ParseTemplate(name string) (*template.Template, error) {
 	}
 	return template.New(name).Parse(string(data))
 }
+
+// ReadDoc reads the named Markdown file from disk on every call so
+// edits take effect without a server restart.
+func ReadDoc(name string) ([]byte, error) {
+	return os.ReadFile(filepath.Join("server", "web", "doc", name))
+}
