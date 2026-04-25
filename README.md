@@ -93,6 +93,46 @@ docker run --rm \
 | `FURNACE_CORS_ORIGINS` | _(none = `*`)_ | Comma-separated allowed origins for the protocol server |
 | `FURNACE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 
+### Running the published image
+
+Pre-built images are published to [hub.docker.com/u/callezenwaka](https://hub.docker.com/u/callezenwaka). No clone required:
+
+```bash
+docker run --rm \
+  -p 8025:8025 \
+  -p 8026:8026 \
+  -v furnace_data:/data \
+  callezenwaka/furnace:latest
+```
+
+Pin a specific release:
+
+```bash
+docker run --rm \
+  -p 8025:8025 \
+  -p 8026:8026 \
+  -v furnace_data:/data \
+  -e FURNACE_API_KEY=changeme \
+  callezenwaka/furnace:v0.1.0
+```
+
+### Publishing a release
+
+Tag the commit and push — the release workflow builds and pushes to Docker Hub automatically:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+To publish manually:
+
+```bash
+docker build -t callezenwaka/furnace:v0.1.0 -t callezenwaka/furnace:latest .
+docker push callezenwaka/furnace:v0.1.0
+docker push callezenwaka/furnace:latest
+```
+
 ## Make Targets
 
 | Target | Description |
