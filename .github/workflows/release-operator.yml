@@ -64,3 +64,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+
+      - name: Upload CRD manifests
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            operator/config/crd/bases/furnace.io_furnaceusers.yaml
+            operator/config/crd/bases/furnace.io_furnacegroups.yaml

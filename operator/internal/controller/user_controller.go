@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1alpha1 "github.com/callezenwaka/furnace-operator/api/v1alpha1"
+	v1beta1 "github.com/callezenwaka/furnace-operator/api/v1beta1"
 )
 
 const finalizerName = "furnace.io/user-finalizer"
@@ -55,7 +55,7 @@ func NewUserReconciler(c client.Client, scheme *runtime.Scheme, scimURL, scimKey
 func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var user v1alpha1.FurnaceUser
+	var user v1beta1.FurnaceUser
 	if err := r.Get(ctx, req.NamespacedName, &user); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -68,7 +68,9 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if controllerutil.ContainsFinalizer(&user, finalizerName) {
 			if err := r.scimDeleteUser(ctx, user.Name); err != nil {
 				logger.Error(err, "failed to delete user from Furnace")
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				r.setCondition(&user, metav1.ConditionUnknown, "Pending", err.Error())
+				_ = r.Status().Update(ctx, &user)
+				return ctrl.Result{}, err
 			}
 			controllerutil.RemoveFinalizer(&user, finalizerName)
 			if err := r.Update(ctx, &user); err != nil {
@@ -89,25 +91,25 @@ func (r *UserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// Upsert: try PUT first (idempotent), fall back to POST on 404.
 	if err := r.scimUpsertUser(ctx, &user); err != nil {
 		logger.Error(err, "failed to upsert user in Furnace")
-		r.setCondition(&user, "Ready", metav1.ConditionFalse, "SCIMError", err.Error())
+		r.setCondition(&user, metav1.ConditionFalse, "Failed", err.Error())
 		_ = r.Status().Update(ctx, &user)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{}, err
 	}
 
-	r.setCondition(&user, "Ready", metav1.ConditionTrue, "Synced", "user synced to Furnace")
+	r.setCondition(&user, metav1.ConditionTrue, "Synced", "user synced to Furnace")
 	_ = r.Status().Update(ctx, &user)
 	return ctrl.Result{}, nil
 }
 
 func (r *UserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.FurnaceUser{}).
+		For(&v1beta1.FurnaceUser{}).
 		Complete(r)
 }
 
 // ── SCIM helpers ─────────────────────────────────────────────────────────────
 
-func (r *UserReconciler) scimUpsertUser(ctx context.Context, user *v1alpha1.FurnaceUser) error {
+func (r *UserReconciler) scimUpsertUser(ctx context.Context, user *v1beta1.FurnaceUser) error {
 	body := map[string]any{
 		"schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:User"},
 		"id":          user.Name,
@@ -183,10 +185,10 @@ func (r *UserReconciler) scimRequest(ctx context.Context, method, path string, b
 	return resp.StatusCode, nil
 }
 
-func (r *UserReconciler) setCondition(user *v1alpha1.FurnaceUser, condType string, status metav1.ConditionStatus, reason, message string) {
+func (r *UserReconciler) setCondition(user *v1beta1.FurnaceUser, status metav1.ConditionStatus, reason, message string) {
 	now := metav1.Now()
 	for i, c := range user.Status.Conditions {
-		if c.Type == condType {
+		if c.Type == "Synced" {
 			user.Status.Conditions[i].Status = status
 			user.Status.Conditions[i].Reason = reason
 			user.Status.Conditions[i].Message = message
@@ -195,7 +197,7 @@ func (r *UserReconciler) setCondition(user *v1alpha1.FurnaceUser, condType strin
 		}
 	}
 	user.Status.Conditions = append(user.Status.Conditions, metav1.Condition{
-		Type:               condType,
+		Type:               "Synced",
 		Status:             status,
 		Reason:             reason,
 		Message:            message,

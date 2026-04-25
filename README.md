@@ -633,10 +633,17 @@ terraform import furnace_user.alice usr_123
 
 ### Kubernetes Operator
 
+Apply CRD manifests from the latest operator release, then deploy the operator:
+
+```bash
+kubectl apply -f https://github.com/<owner>/furnace/releases/latest/download/furnace.io_furnaceusers.yaml
+kubectl apply -f https://github.com/<owner>/furnace/releases/latest/download/furnace.io_furnacegroups.yaml
+```
+
 Apply a user manifest — the operator syncs it to Furnace via SCIM:
 
 ```yaml
-apiVersion: furnace.io/v1alpha1
+apiVersion: furnace.io/v1beta1
 kind: FurnaceUser
 metadata:
   name: alice
@@ -644,11 +651,17 @@ spec:
   email: alice@example.com
   displayName: Alice
   active: true
+  mfaMethod: totp   # one of: none, totp, sms, push, magic_link, webauthn
 ```
 
 ```bash
 kubectl apply -f alice.yaml
+kubectl get furnaceuser alice
+# NAME    EMAIL                  ACTIVE   SYNCED   AGE
+# alice   alice@example.com      true     True     10s
 ```
+
+The `SYNCED` column reflects the reconciliation state: `True` (synced), `False` (SCIM error), or `Unknown` (pending deletion). Failed SCIM calls surface as a condition on the object and are retried with exponential backoff — no manual intervention needed.
 
 Configure the operator with `FURNACE_SCIM_URL` and `FURNACE_SCIM_KEY` environment variables (typically mounted from a Kubernetes Secret).
 
@@ -661,7 +674,7 @@ Each component uses path-prefixed git tags. Pushing a tag triggers its own workf
 | `server/v*` | `release-server.yml` | GitHub Release + `ghcr.io/<owner>/furnace:<version>` |
 | `helm/v*` | `release-helm.yml` | Helm chart published to GitHub Pages |
 | `terraform/v*` | `release-terraform.yml` | Terraform provider binaries (GPG-signed) |
-| `operator/v*` | `release-operator.yml` | `ghcr.io/<owner>/furnace-operator:<version>` |
+| `operator/v*` | `release-operator.yml` | `ghcr.io/<owner>/furnace-operator:<version>` + CRD YAML manifests |
 
 ## Folder Structure
 

@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1alpha1 "github.com/callezenwaka/furnace-operator/api/v1alpha1"
+	v1beta1 "github.com/callezenwaka/furnace-operator/api/v1beta1"
 )
 
 const groupFinalizerName = "furnace.io/group-finalizer"
@@ -45,7 +45,7 @@ func NewGroupReconciler(c client.Client, scheme *runtime.Scheme, scimURL, scimKe
 func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var group v1alpha1.FurnaceGroup
+	var group v1beta1.FurnaceGroup
 	if err := r.Get(ctx, req.NamespacedName, &group); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -58,7 +58,9 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if controllerutil.ContainsFinalizer(&group, groupFinalizerName) {
 			if err := r.scimDeleteGroup(ctx, group.Name); err != nil {
 				logger.Error(err, "failed to delete group from Furnace")
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				r.setCondition(&group, metav1.ConditionUnknown, "Pending", err.Error())
+				_ = r.Status().Update(ctx, &group)
+				return ctrl.Result{}, err
 			}
 			controllerutil.RemoveFinalizer(&group, groupFinalizerName)
 			if err := r.Update(ctx, &group); err != nil {
@@ -79,25 +81,25 @@ func (r *GroupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Upsert: try PUT first (idempotent), fall back to POST on 404.
 	if err := r.scimUpsertGroup(ctx, &group); err != nil {
 		logger.Error(err, "failed to upsert group in Furnace")
-		r.setGroupCondition(&group, "Ready", metav1.ConditionFalse, "SCIMError", err.Error())
+		r.setCondition(&group, metav1.ConditionFalse, "Failed", err.Error())
 		_ = r.Status().Update(ctx, &group)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{}, err
 	}
 
-	r.setGroupCondition(&group, "Ready", metav1.ConditionTrue, "Synced", "group synced to Furnace")
+	r.setCondition(&group, metav1.ConditionTrue, "Synced", "group synced to Furnace")
 	_ = r.Status().Update(ctx, &group)
 	return ctrl.Result{}, nil
 }
 
 func (r *GroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.FurnaceGroup{}).
+		For(&v1beta1.FurnaceGroup{}).
 		Complete(r)
 }
 
 // ── SCIM helpers ─────────────────────────────────────────────────────────────
 
-func (r *GroupReconciler) scimUpsertGroup(ctx context.Context, group *v1alpha1.FurnaceGroup) error {
+func (r *GroupReconciler) scimUpsertGroup(ctx context.Context, group *v1beta1.FurnaceGroup) error {
 	body := map[string]any{
 		"schemas":     []string{"urn:ietf:params:scim:schemas:core:2.0:Group"},
 		"id":          group.Name,
@@ -137,8 +139,6 @@ func (r *GroupReconciler) scimDeleteGroup(ctx context.Context, id string) error 
 }
 
 func (r *GroupReconciler) scimGroupRequest(ctx context.Context, method, path string, body map[string]any) (int, error) {
-	// Reuse user reconciler's scimRequest logic via a shared helper.
-	// We instantiate a temporary UserReconciler to avoid duplicating code.
 	ur := &UserReconciler{
 		SCIMURL: r.SCIMURL,
 		SCIMKey: r.SCIMKey,
@@ -147,10 +147,10 @@ func (r *GroupReconciler) scimGroupRequest(ctx context.Context, method, path str
 	return ur.scimRequest(ctx, method, path, body)
 }
 
-func (r *GroupReconciler) setGroupCondition(group *v1alpha1.FurnaceGroup, condType string, status metav1.ConditionStatus, reason, message string) {
+func (r *GroupReconciler) setCondition(group *v1beta1.FurnaceGroup, status metav1.ConditionStatus, reason, message string) {
 	now := metav1.Now()
 	for i, c := range group.Status.Conditions {
-		if c.Type == condType {
+		if c.Type == "Synced" {
 			group.Status.Conditions[i].Status = status
 			group.Status.Conditions[i].Reason = reason
 			group.Status.Conditions[i].Message = message
@@ -159,7 +159,7 @@ func (r *GroupReconciler) setGroupCondition(group *v1alpha1.FurnaceGroup, condTy
 		}
 	}
 	group.Status.Conditions = append(group.Status.Conditions, metav1.Condition{
-		Type:               condType,
+		Type:               "Synced",
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
