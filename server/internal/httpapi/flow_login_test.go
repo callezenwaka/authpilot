@@ -109,14 +109,37 @@ func TestM2_NoMFAFlowCompletes(t *testing.T) {
 	}
 }
 
+// csrfTokenForFlow performs GET /login?flow_id=id, extracts and returns the CSRF
+// cookie value, and the request cookie to send with subsequent POST requests.
+func csrfTokenForFlow(t *testing.T, router http.Handler, flowID string) (cookieValue string, cookie *http.Cookie) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/login?flow_id="+flowID, nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "furnace_csrf" {
+			return c.Value, c
+		}
+	}
+	t.Fatal("furnace_csrf cookie not set by GET /login")
+	return "", nil
+}
+
 func TestM2_MFAFlowCompletesThroughLoginPages(t *testing.T) {
 	router, users, flows := newFlowRouterForTest()
 	seedUser(t, users, "usr_totp", "totp", "normal")
 	seedFlow(t, flows, "flow_mfa")
 
-	pick := doForm(t, router, http.MethodPost, "/login/select-user?flow_id=flow_mfa", url.Values{
-		"user_id": {"usr_totp"},
-	})
+	// GET /login to obtain CSRF token.
+	csrfVal, csrfCookie := csrfTokenForFlow(t, router, "flow_mfa")
+
+	req := httptest.NewRequest(http.MethodPost, "/login/select-user?flow_id=flow_mfa",
+		strings.NewReader(url.Values{"user_id": {"usr_totp"}, "csrf_token": {csrfVal}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(csrfCookie)
+	pick := httptest.NewRecorder()
+	router.ServeHTTP(pick, req)
+
 	if pick.Code != http.StatusFound {
 		t.Fatalf("expected 302 from user select, got %d body=%s", pick.Code, pick.Body.String())
 	}
@@ -175,6 +198,41 @@ func TestM2_InvalidTransitionsReturnConflict(t *testing.T) {
 	if !strings.Contains(expectedMismatch.Body.String(), "STATE_TRANSITION_INVALID") {
 		t.Fatalf("expected STATE_TRANSITION_INVALID error, got %s", expectedMismatch.Body.String())
 	}
+}
+
+func TestM16_CSRF_MissingOrInvalidToken_Returns403(t *testing.T) {
+	router, users, flows := newFlowRouterForTest()
+	seedUser(t, users, "usr_csrf", "none", "normal")
+	seedFlow(t, flows, "flow_csrf")
+
+	t.Run("no_cookie_no_token", func(t *testing.T) {
+		rr := doForm(t, router, http.MethodPost, "/login/select-user?flow_id=flow_csrf", url.Values{
+			"user_id": {"usr_csrf"},
+		})
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "CSRF_INVALID") {
+			t.Fatalf("expected CSRF_INVALID, got %s", rr.Body.String())
+		}
+	})
+
+	t.Run("cookie_present_but_wrong_form_token", func(t *testing.T) {
+		csrfVal, csrfCookie := csrfTokenForFlow(t, router, "flow_csrf")
+		_ = csrfVal
+		req := httptest.NewRequest(http.MethodPost, "/login/select-user?flow_id=flow_csrf",
+			strings.NewReader(url.Values{"user_id": {"usr_csrf"}, "csrf_token": {"wrongtoken"}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(csrfCookie)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "CSRF_INVALID") {
+			t.Fatalf("expected CSRF_INVALID, got %s", rr.Body.String())
+		}
+	})
 }
 
 func TestM2_CompletedAt_SetOnTerminalState(t *testing.T) {

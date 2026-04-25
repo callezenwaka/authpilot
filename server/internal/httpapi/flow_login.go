@@ -1,6 +1,9 @@
 package httpapi
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -18,6 +21,14 @@ import (
 
 const defaultFlowTTL = 30 * time.Minute
 
+func newCSRFToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
 type flowMutationRequest struct {
 	UserID        string `json:"user_id"`
 	Code          string `json:"code"`
@@ -25,13 +36,14 @@ type flowMutationRequest struct {
 }
 
 type loginViewData struct {
-	FlowID               string
-	Flow                 domain.Flow
-	Users                []domain.User
-	User                 domain.User
-	Error                string
-	HasError             bool
+	FlowID                string
+	Flow                  domain.Flow
+	Users                 []domain.User
+	User                  domain.User
+	Error                 string
+	HasError              bool
 	HasWebAuthnCredential bool
+	CSRFToken             string
 }
 
 var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
@@ -66,6 +78,7 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html>
     <p class="sub">Select your account to continue</p>
     {{if .HasError}}<div class="err">{{.Error}}</div>{{end}}
     <form method="post" action="/login/select-user?flow_id={{.FlowID}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       {{range .Users}}
         <label class="user-option">
           <input type="radio" name="user_id" value="{{.ID}}" required>
@@ -391,8 +404,20 @@ func loginPageHandler(flows store.FlowStore, users store.UserStore) http.Handler
 			writeError(w, http.StatusInternalServerError, "list_users_failed", err.Error())
 			return
 		}
+		csrfToken, err := newCSRFToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "csrf_failed", "could not generate CSRF token")
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     "furnace_csrf",
+			Value:    csrfToken,
+			Path:     "/login",
+			SameSite: http.SameSiteStrictMode,
+			HttpOnly: true,
+		})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = loginTemplate.Execute(w, loginViewData{FlowID: flowID, Flow: flow, Users: userList})
+		_ = loginTemplate.Execute(w, loginViewData{FlowID: flowID, Flow: flow, Users: userList, CSRFToken: csrfToken})
 	}
 }
 
@@ -400,6 +425,14 @@ func loginSelectUserHandler(flows store.FlowStore, users store.UserStore) http.H
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_form", err.Error())
+			return
+		}
+		// CSRF double-submit cookie check.
+		cookie, cookieErr := r.Cookie("furnace_csrf")
+		formToken := r.FormValue("csrf_token")
+		if cookieErr != nil || formToken == "" ||
+			subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(formToken)) != 1 {
+			writeError(w, http.StatusForbidden, "CSRF_INVALID", "invalid or missing CSRF token")
 			return
 		}
 		flowID := strings.TrimSpace(r.URL.Query().Get("flow_id"))

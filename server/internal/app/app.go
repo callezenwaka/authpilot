@@ -69,6 +69,11 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("seed users: %w", err)
 	}
 
+	if cfg.APIKey != "" && len(cfg.APIKey) < 16 {
+		logger.Warn("api key is shorter than 16 characters; use a stronger key in production",
+			"length", len(cfg.APIKey))
+	}
+
 	httpBaseURL := "http://localhost" + cfg.HTTPAddr
 	km, err := oidcengine.NewKeyManager()
 	if err != nil {
@@ -182,7 +187,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	protocolServer := &http.Server{
 		Addr:              cfg.ProtocolAddr,
-		Handler:           corsMiddleware(protocolMux),
+		Handler:           corsMiddleware(cfg.CORSOrigins)(protocolMux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -360,19 +365,34 @@ func seedUsers(users store.UserStore, seeds []config.SeedUser) error {
 	return nil
 }
 
-// corsMiddleware adds permissive CORS headers to all protocol server responses.
-// This allows the admin SPA (served on a different port) to fetch metadata documents.
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// corsMiddleware returns a middleware that applies CORS headers to protocol server responses.
+// When origins is empty, Access-Control-Allow-Origin is set to "*".
+// When origins is non-empty, only requests from a listed origin receive the matching header.
+// Set FURNACE_CORS_ORIGINS (comma-separated) to restrict allowed origins in production.
+func corsMiddleware(origins []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(origins) == 0 {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			} else {
+				requestOrigin := r.Header.Get("Origin")
+				for _, o := range origins {
+					if o == requestOrigin {
+						w.Header().Set("Access-Control-Allow-Origin", requestOrigin)
+						w.Header().Add("Vary", "Origin")
+						break
+					}
+				}
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // issuerConfigPatcher adapts oidcengine.Issuer to the httpapi.ConfigPatcher interface.

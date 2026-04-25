@@ -361,6 +361,42 @@ curl -H "Authorization: Bearer mysecret" http://localhost:8025/api/v1/users
 }
 ```
 
+## Security
+
+### CSRF Protection
+
+The server-rendered login form at `/login` uses the double-submit cookie pattern. On every `GET /login` request a random 32-byte token is generated, set as the `furnace_csrf` HttpOnly cookie, and embedded as a hidden `csrf_token` field in the form. The `POST /login/select-user` handler rejects requests where the cookie and form field are absent or do not match, returning `403 CSRF_INVALID`. Cross-origin form submissions cannot read the cookie value, so forged requests are blocked without requiring a session.
+
+### CORS
+
+By default the API returns `Access-Control-Allow-Origin: *`, which is safe for local development. For hosted deployments, restrict the allowed origins:
+
+```bash
+FURNACE_CORS_ORIGINS=https://admin.example.com,https://id.example.com go run ./server/cmd/furnace
+```
+
+When set, only requests whose `Origin` header matches one of the listed values receive a matching `Access-Control-Allow-Origin` response header. Requests from unlisted origins receive no CORS header.
+
+### API Key Strength
+
+```bash
+FURNACE_API_KEY=mysecret go run ./server/cmd/furnace
+```
+
+Furnace logs a `WARN` at startup when the API key is shorter than 16 characters. Use a randomly generated key of at least 32 characters in any network-exposed deployment.
+
+```bash
+openssl rand -hex 32
+```
+
+### Network Exposure
+
+Furnace binds to `0.0.0.0` by default. In local development this is intentional. Before exposing Furnace to a network:
+
+- Set a strong `FURNACE_API_KEY`.
+- Set `FURNACE_CORS_ORIGINS` to your admin SPA origin.
+- Place Furnace behind a TLS-terminating reverse proxy (nginx, Caddy, or a load balancer). WebAuthn requires HTTPS for any origin other than `localhost`.
+
 ## Login Simulation
 
 The login UI at `/login` lets you pick any seeded user and walk through a flow without a real password. Set `next_flow` on a user to inject a scenario:

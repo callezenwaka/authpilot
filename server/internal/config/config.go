@@ -53,6 +53,7 @@ type Config struct {
 	APIKey            string        `yaml:"api_key"`            // empty = local dev mode (no auth); ignored in multi-tenant mode
 	SCIMKey           string        `yaml:"scim_key"`           // separate credential for /scim/v2; falls back to APIKey when empty
 	RateLimit         int           `yaml:"rate_limit"`         // requests/min per IP on /api/v1; 0 = disabled
+	CORSOrigins       []string      `yaml:"cors_origins"`       // FURNACE_CORS_ORIGINS; allowed origins for protocol server; empty = "*"
 	SeedUsers         []SeedUser    `yaml:"seed_users"`         // users created at startup; idempotent
 	HeaderPropagation bool          `yaml:"header_propagation"` // inject X-User-* headers on /userinfo responses
 	Tenancy           TenancyMode    `yaml:"tenancy"`            // "single" (default) or "multi"
@@ -327,6 +328,13 @@ func applyEnv(cfg *Config) error {
 	}
 	if v := strings.TrimSpace(os.Getenv("FURNACE_SCIM_KEY")); v != "" {
 		cfg.SCIMKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_CORS_ORIGINS")); v != "" {
+		for _, o := range strings.Split(v, ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				cfg.CORSOrigins = append(cfg.CORSOrigins, o)
+			}
+		}
 	}
 	if v := strings.TrimSpace(os.Getenv("FURNACE_RATE_LIMIT")); v != "" {
 		n, err := strconv.Atoi(v)
