@@ -147,6 +147,10 @@ func NewRouter(dep Dependencies) http.Handler {
 		loginMagicHandler(flows, users)(w, r)
 	}).Methods(http.MethodGet)
 
+	// OpenAPI spec and Swagger UI are public — no auth required.
+	r.HandleFunc("/api/v1/openapi.json", openAPISpecHandler).Methods(http.MethodGet)
+	r.HandleFunc("/api/v1/docs", openAPIDocsHandler).Methods(http.MethodGet)
+
 	api := r.PathPrefix("/api/v1").Subrouter()
 	if dep.TenantStores != nil && len(dep.TenantEntries) > 0 {
 		api.Use(tenantAPIKeyMiddleware(dep.TenantEntries))
@@ -161,10 +165,6 @@ func NewRouter(dep Dependencies) http.Handler {
 
 	idempStore := newIdempotencyStore(5 * time.Minute)
 	api.Use(idempotencyMiddleware(idempStore))
-
-	// Meta endpoints — no auth needed even in protected mode.
-	api.HandleFunc("/openapi.json", openAPISpecHandler).Methods(http.MethodGet)
-	api.HandleFunc("/docs", openAPIDocsHandler).Methods(http.MethodGet)
 
 	api.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		users, _, _, _, _ := dep.resolveStores(r.Context())
