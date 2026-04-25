@@ -55,6 +55,27 @@ This builds the image and starts Furnace with:
 - Management API + login UI on port `8025`
 - Protocol server (OIDC / SAML / WS-Fed) on port `8026`
 
+**Admin API key** — on first run, Furnace generates a random key and prints it to the logs:
+
+```
+[furnace] Admin API Key: furn_a3f9c2d18e4b7a6f0c5d2e1b9a8f3c7d4e2b
+[furnace] Set FURNACE_API_KEY env var to persist this key across restarts.
+```
+
+The key is also visible in the admin UI under **Config → Admin API Key** where you can copy it with one click. To make it persistent across restarts, add it to a `.env` file:
+
+```bash
+# .env  (add to .gitignore — share with your team via a secrets tool)
+FURNACE_API_KEY=furn_a3f9c2d18e4b7a6f0c5d2e1b9a8f3c7d4e2b
+```
+
+`docker-compose.yml` reads it automatically:
+
+```yaml
+environment:
+  FURNACE_API_KEY: ${FURNACE_API_KEY}
+```
+
 To run without persisting data between restarts:
 
 ```bash
@@ -70,9 +91,10 @@ docker run --rm \
   -p 8025:8025 \
   -p 8026:8026 \
   -v furnace_data:/data \
-  -e FURNACE_API_KEY=changeme \
   furnace
 ```
+
+Furnace auto-generates an admin key on startup and prints it to the terminal. Open `http://localhost:8025/admin`, go to **Config → Admin API Key**, and copy it from there. Pass it as `FURNACE_API_KEY` on subsequent runs to keep the same key.
 
 ### Ports
 
@@ -87,7 +109,7 @@ docker run --rm \
 |----------|---------|-------------|
 | `FURNACE_HTTP_ADDR` | `:8025` | Management server listen address |
 | `FURNACE_PROTOCOL_ADDR` | `:8026` | Protocol server listen address |
-| `FURNACE_API_KEY` | _(none)_ | Protects `/api/v1/`; omit for open local dev |
+| `FURNACE_API_KEY` | _(auto-generated)_ | Protects `/api/v1/`; auto-generated and printed on startup if not set; visible in **Config → Admin API Key** |
 | `FURNACE_PERSISTENCE_ENABLED` | `true` | `false` = in-memory only (resets on restart) |
 | `FURNACE_SQLITE_PATH` | `./data/furnace.db` | SQLite database path |
 | `FURNACE_CORS_ORIGINS` | _(none = `*`)_ | Comma-separated allowed origins for the protocol server |
@@ -114,6 +136,8 @@ docker run --rm \
   -v furnace_data:/data \
   ghcr.io/callezenwaka/furnace:latest
 ```
+
+An admin key is auto-generated on first run. Open `http://localhost:8025/admin` → **Config → Admin API Key** to copy it. Add `-e FURNACE_API_KEY=<your-key>` to subsequent runs to keep it stable.
 
 Pin a specific version by replacing `:latest` with `:v0.1.0`.
 

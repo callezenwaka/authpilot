@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"furnace/server/internal/config"
@@ -74,6 +77,16 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	if err := seedUsers(users, cfg.SeedUsers); err != nil {
 		return nil, fmt.Errorf("seed users: %w", err)
+	}
+
+	// Admin API is always protected — auto-generate a key if none is configured.
+	if cfg.APIKey == "" {
+		key, err := generateAdminKey()
+		if err != nil {
+			return nil, fmt.Errorf("generate admin api key: %w", err)
+		}
+		cfg.APIKey = key
+		fmt.Fprintf(os.Stderr, "\n[furnace] Admin API Key: %s\n[furnace] Set FURNACE_API_KEY env var to persist this key across restarts.\n\n", key)
 	}
 
 	if cfg.APIKey != "" && len(cfg.APIKey) < 16 {
@@ -443,6 +456,14 @@ func (p *issuerConfigPatcher) SetTokenTTLs(ttls httpapi.TokenTTLs) error {
 	}
 	p.issuer.SetTokenConfig(cfg)
 	return nil
+}
+
+func generateAdminKey() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "furn_" + hex.EncodeToString(b), nil
 }
 
 // issuerMinter adapts oidcengine.Issuer to the httpapi.TokenMinter interface.

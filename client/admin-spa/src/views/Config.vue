@@ -63,13 +63,51 @@
       </div>
     </div>
 
+    <!-- Admin API Key -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <h2>Admin API Key</h2>
+        <span class="badge badge-gray">restart required to change</span>
+      </div>
+      <div class="card-body">
+        <p style="margin:0 0 14px;font-size:13px;color:var(--text-muted)">
+          Use this key to access the admin API directly (e.g. <code>curl</code>, CI scripts).
+          Set <code>FURNACE_API_KEY</code> env var to persist this key across restarts.
+        </p>
+        <div class="key-row">
+          <code class="key-display">{{ keyVisible ? adminApiKey : maskedKey }}</code>
+          <button class="btn btn-ghost btn-sm" @click="keyVisible = !keyVisible">
+            {{ keyVisible ? 'Hide' : 'Show' }}
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="copyKey">
+            {{ keyCopied ? 'Copied!' : 'Copy' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loadError" class="error-msg">{{ loadError }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { apiFetch } from '../auth'
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+
+const adminApiKey = window.__FURNACE__?.apiKey ?? ''
+const keyVisible  = ref(false)
+const keyCopied   = ref(false)
+
+const maskedKey = computed(() =>
+  adminApiKey ? adminApiKey.slice(0, 8) + '•'.repeat(Math.max(0, adminApiKey.length - 8)) : '—'
+)
+
+async function copyKey() {
+  if (!adminApiKey) return
+  await navigator.clipboard.writeText(adminApiKey)
+  keyCopied.value = true
+  setTimeout(() => { keyCopied.value = false }, 2000)
+}
 
 interface TTLs {
   access_token_ttl: number | null
@@ -146,6 +184,22 @@ onMounted(loadConfig)
 </script>
 
 <style scoped>
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.key-display {
+  flex: 1;
+  font-size: 13px;
+  word-break: break-all;
+  color: var(--text);
+  user-select: all;
+}
 .personality-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
