@@ -22,7 +22,7 @@ BUILD := $(build)
 endif
 
 build:
-	go build ./server/cmd/furnace
+	go build -tags prod -o furnace ./server/cmd/furnace
 
 test:
 	go test ./server/...

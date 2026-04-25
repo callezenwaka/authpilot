@@ -55,6 +55,45 @@ func (s *Store) migrate() error {
 			member_ids_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS flows (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL DEFAULT '',
+			state TEXT NOT NULL,
+			scenario TEXT NOT NULL DEFAULT '',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			protocol TEXT NOT NULL DEFAULT '',
+			client_id TEXT NOT NULL DEFAULT '',
+			redirect_uri TEXT NOT NULL DEFAULT '',
+			scopes_json TEXT NOT NULL DEFAULT '[]',
+			response_type TEXT NOT NULL DEFAULT '',
+			oauth_state TEXT NOT NULL DEFAULT '',
+			nonce TEXT NOT NULL DEFAULT '',
+			pkce_challenge TEXT NOT NULL DEFAULT '',
+			pkce_method TEXT NOT NULL DEFAULT '',
+			auth_code TEXT NOT NULL DEFAULT '',
+			totp_secret TEXT NOT NULL DEFAULT '',
+			sms_code TEXT NOT NULL DEFAULT '',
+			magic_link_token TEXT NOT NULL DEFAULT '',
+			magic_link_used INTEGER NOT NULL DEFAULT 0,
+			webauthn_challenge TEXT NOT NULL DEFAULT '',
+			webauthn_session TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			completed_at TEXT
+		);`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL DEFAULT '',
+			flow_id TEXT NOT NULL DEFAULT '',
+			protocol TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			client_id TEXT NOT NULL DEFAULT '',
+			events_json TEXT NOT NULL DEFAULT '[]',
+			refresh_token TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {

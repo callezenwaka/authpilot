@@ -22,6 +22,7 @@ import (
 	"furnace/server/internal/store/tenanted"
 	"furnace/server/internal/tenant"
 	wsfedengine "furnace/server/internal/wsfed"
+	"furnace/server/web"
 )
 
 // auditCap is the maximum number of audit events held in memory.
@@ -47,6 +48,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	var groups store.GroupStore
 	closers := make([]func() error, 0)
 
+	var flows store.FlowStore
+	var sessions store.SessionStore
+
 	if cfg.Persistence.Enabled {
 		sqlite, err := sqliteStore.New(cfg.Persistence.SQLitePath)
 		if err != nil {
@@ -54,14 +58,15 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		}
 		users = sqlite.Users()
 		groups = sqlite.Groups()
+		flows = sqlite.Flows()
+		sessions = sqlite.Sessions()
 		closers = append(closers, sqlite.Close)
 	} else {
 		users = memory.NewUserStore()
 		groups = memory.NewGroupStore()
+		flows = memory.NewFlowStore()
+		sessions = memory.NewSessionStore()
 	}
-
-	flows := memory.NewFlowStore()
-	sessions := memory.NewSessionStore()
 	auditStore := memory.NewAuditStore(auditCap)
 	scimEventStore := memory.NewSCIMEventStore(auditCap)
 
@@ -128,6 +133,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		TenantEntries: tenantEntries,
 		SCIMClient:    scimCl,
 		SCIMEvents:    scimEventStore,
+		AdminFS:       web.AdminFS,
 	})
 
 	httpServer := &http.Server{

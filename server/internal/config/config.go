@@ -105,7 +105,7 @@ func Defaults() Config {
 		ProtocolAddr: ":8026",
 		LogLevel:     "info",
 		Persistence: PersistenceConfig{
-			Enabled:    false,
+			Enabled:    true,
 			SQLitePath: "./data/furnace.db",
 		},
 		Cleanup: CleanupConfig{

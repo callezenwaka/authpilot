@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -70,6 +71,7 @@ type Dependencies struct {
 	Sessions        store.SessionStore
 	Audit           store.AuditStore  // nil = audit disabled
 	AdminStaticDir  string
+	AdminFS         fs.FS  // non-nil in prod builds: serve admin SPA from embedded FS
 	APIKey          string        // empty = local dev mode (no auth required); ignored in multi-tenant mode
 	SCIMKey         string        // separate credential for /scim/v2; falls back to APIKey when empty
 	BaseURL         string        // e.g. "http://localhost:8025" — used for magic link URLs
@@ -108,7 +110,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	r := mux.NewRouter()
 	r.Use(requestIDMiddleware)
 
-	registerAdminRoutes(r, dep.AdminStaticDir)
+	registerAdminRoutes(r, dep.AdminStaticDir, dep.AdminFS)
 
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
@@ -384,11 +386,21 @@ func exportHandler(users store.UserStore, groups store.GroupStore) http.HandlerF
 	}
 }
 
-func registerAdminRoutes(r *mux.Router, adminStaticDir string) {
+func registerAdminRoutes(r *mux.Router, adminStaticDir string, adminFS fs.FS) {
+	if adminFS != nil {
+		// Prod: serve from embedded filesystem.
+		fileServer := http.FileServer(http.FS(adminFS))
+		r.PathPrefix("/admin/assets/").Handler(http.StripPrefix("/admin/", fileServer))
+		r.Handle("/admin/vite.svg", http.StripPrefix("/admin/", fileServer))
+		r.HandleFunc("/admin", serveAdminIndexFS(adminFS))
+		r.PathPrefix("/admin/").HandlerFunc(serveAdminIndexFS(adminFS))
+		return
+	}
+
+	// Dev: serve from disk.
 	if adminStaticDir == "" {
 		adminStaticDir = filepath.Join("server", "web", "static", "admin")
 	}
-
 	adminIndexPath := filepath.Join(adminStaticDir, "index.html")
 	adminAssets := http.StripPrefix("/admin/", http.FileServer(http.Dir(adminStaticDir)))
 
@@ -396,6 +408,24 @@ func registerAdminRoutes(r *mux.Router, adminStaticDir string) {
 	r.Handle("/admin/vite.svg", adminAssets)
 	r.HandleFunc("/admin", serveAdminIndex(adminIndexPath))
 	r.PathPrefix("/admin/").HandlerFunc(serveAdminIndex(adminIndexPath))
+}
+
+func serveAdminIndexFS(adminFS fs.FS) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		f, err := adminFS.Open("index.html")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "admin_spa_unavailable", err.Error())
+			return
+		}
+		defer f.Close()
+		content, err := io.ReadAll(f)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "admin_spa_unavailable", err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(content)
+	}
 }
 
 func serveAdminIndex(indexPath string) http.HandlerFunc {
@@ -408,7 +438,6 @@ func serveAdminIndex(indexPath string) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "admin_spa_unavailable", err.Error())
 			return
 		}
-
 		http.ServeFile(w, r, indexPath)
 	}
 }

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Furnace Complete</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='7' y='24' font-size='20' font-weight='700' font-family='system-ui,sans-serif' fill='white'%3EF%3C/text%3E%3C/svg%3E">
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:#f5f6fa;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .card{background:#fff;border:1px solid #e2e4ea;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);width:100%;max-width:440px;padding:32px}
+  .logo{font-weight:700;font-size:18px;color:#1e293b;margin-bottom:24px;letter-spacing:.02em}.logo span{color:#2563eb}
+  .icon{font-size:2.5rem;margin-bottom:12px}
+  h1{margin:0 0 4px;font-size:1.25rem;font-weight:700}
+  .sub{color:#6b7280;font-size:.875rem;margin-bottom:20px}
+  .detail{background:#f5f6fa;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:.85rem}
+  .detail{background:#f5f6fa;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:.85rem}
+  .detail dt{color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.04em;font-size:.72rem;margin-bottom:2px}
+  .detail dd{margin:0 0 10px;word-break:break-all}.detail dd:last-child{margin-bottom:0}
+  .err{color:#dc2626;font-size:.875rem;padding:10px 12px;background:#fee2e2;border-radius:6px;margin-bottom:16px}
+  a{color:#2563eb;text-decoration:none;font-size:.875rem}.a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Fur<span>nace</span></div>
+    {{if .Flow.Error}}
+      <div class="icon">❌</div>
+      <h1>Authentication Failed</h1>
+      <p class="sub">The login flow could not be completed.</p>
+      <div class="err">{{.Flow.Error}}</div>
+    {{else}}
+      <div class="icon">✅</div>
+      <h1>Authentication Complete</h1>
+      <p class="sub">The login flow finished successfully.</p>
+    {{end}}
+    <dl class="detail">
+      <dt>State</dt><dd>{{.Flow.State}}</dd>
+      {{if .Flow.UserID}}<dt>User</dt><dd>{{.User.DisplayName}} ({{.User.Email}})</dd>{{end}}
+      <dt>Flow ID</dt><dd>{{.FlowID}}</dd>
+    </dl>
+    <a href="/login">← Start a new login</a>
+  </div>
+</body>
+</html>
