@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Furnace</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232563eb'/%3E%3Ctext x='7' y='24' font-size='20' font-weight='700' font-family='system-ui,sans-serif' fill='white'%3EF%3C/text%3E%3C/svg%3E">
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:#f5f6fa;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}
+  .card{background:#fff;border:1px solid #e2e4ea;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);width:100%;max-width:480px;padding:36px}
+  .logo{font-weight:700;font-size:20px;color:#1e293b;margin-bottom:8px;letter-spacing:.02em}.logo span{color:#2563eb}
+  .tagline{color:#6b7280;font-size:.875rem;margin-bottom:32px}
+  .links{display:flex;flex-direction:column;gap:10px;margin-bottom:32px}
+  .link-btn{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid #e2e4ea;border-radius:6px;text-decoration:none;color:#1e293b;transition:border-color .15s,background .15s}
+  .link-btn:hover{border-color:#2563eb;background:#f0f6ff}
+  .link-btn .icon{font-size:20px;width:28px;text-align:center;flex-shrink:0}
+  .link-btn .text{display:flex;flex-direction:column;gap:2px}
+  .link-btn .label{font-weight:600;font-size:.9rem}
+  .link-btn .desc{font-size:.78rem;color:#6b7280}
+  .divider{border:none;border-top:1px solid #e2e4ea;margin:0 0 24px}
+  .section-title{font-size:.75rem;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+  .key-box{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#f5f6fa;border:1px solid #e2e4ea;border-radius:6px;font-family:ui-monospace,monospace;font-size:.8rem;color:#374151}
+  .key-box code{flex:1;word-break:break-all}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.7rem;font-weight:600;background:#dbeafe;color:#1d4ed8}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Fur<span>nace</span></div>
+    <p class="tagline">Local-first authentication development platform</p>
+
+    <div class="links">
+      <a href="/admin" class="link-btn">
+        <span class="icon">⚙️</span>
+        <span class="text">
+          <span class="label">Admin UI</span>
+          <span class="desc">Manage users, groups, sessions, and audit logs</span>
+        </span>
+      </a>
+      <a href="/api/v1/docs" class="link-btn">
+        <span class="icon">📄</span>
+        <span class="text">
+          <span class="label">API Docs</span>
+          <span class="desc">Interactive Swagger UI for the management API</span>
+        </span>
+      </a>
+      <a href="/login" class="link-btn">
+        <span class="icon">🔑</span>
+        <span class="text">
+          <span class="label">Login Simulator</span>
+          <span class="desc">Test OIDC / SAML flows without a real password</span>
+        </span>
+      </a>
+    </div>
+
+    <hr class="divider">
+
+    <div class="section-title">Admin API Key</div>
+    <div class="key-box">
+      <code>{{.MaskedKey}}</code>
+      <span class="badge">copy from Admin UI</span>
+    </div>
+    <p style="margin:10px 0 0;font-size:.78rem;color:#6b7280">
+      Full key visible under <strong>Admin UI → Config → Admin API Key</strong>.
+      Set <code>FURNACE_API_KEY</code> to make it persistent across restarts.
+    </p>
+  </div>
+</body>
+</html>

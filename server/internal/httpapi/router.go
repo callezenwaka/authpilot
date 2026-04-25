@@ -117,6 +117,8 @@ func NewRouter(dep Dependencies) http.Handler {
 
 	registerAdminRoutes(r, dep.AdminStaticDir, dep.AdminFS, dep.APIKey)
 
+	r.HandleFunc("/", homeHandler(dep.APIKey)).Methods(http.MethodGet)
+
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
 	r.HandleFunc("/ready", readyHandler(dep.Readiness)).Methods(http.MethodGet)
 	r.Handle("/metrics", metricsHandler()).Methods(http.MethodGet)
