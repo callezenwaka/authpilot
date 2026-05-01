@@ -10,6 +10,9 @@ type AuditEvent struct {
 	Actor      string         `json:"actor"`        // user ID or "system"
 	ResourceID string         `json:"resource_id"`  // ID of the affected resource
 	Metadata   map[string]any `json:"metadata,omitempty"`
+	// ChainHash is the tamper-evident hash linking this row to the previous one.
+	// Never exposed via API; used only for integrity verification.
+	ChainHash string `json:"-"`
 }
 
 type User struct {
@@ -23,6 +26,7 @@ type User struct {
 	Claims              map[string]any `json:"claims,omitempty"`
 	PhoneNumber         string         `json:"phone_number,omitempty"`
 	WebAuthnCredentials string         `json:"-"` // JSON-encoded []webauthn.Credential; not exposed in API
+	PasswordHash        string         `json:"-"` // argon2id PHC string or bcrypt hash; never exposed via API
 	CreatedAt           time.Time      `json:"created_at"`
 }
 
@@ -83,6 +87,34 @@ type SCIMEvent struct {
 	ResponseStatus int       `json:"response_status"`
 	ResponseBody   string    `json:"response_body,omitempty"`
 	Error          string    `json:"error,omitempty"` // set when the HTTP request itself failed
+}
+
+// APIKey is a named, scoped credential stored in the key store.
+// The raw key value is returned only on creation and never stored.
+// KeyHash (SHA-256 of the raw key) is used for all subsequent lookups.
+type APIKey struct {
+	ID         string     `json:"id"`
+	Label      string     `json:"label"`
+	KeyHash    string     `json:"-"`
+	Scopes     []string   `json:"scopes"`
+	CreatedAt  time.Time  `json:"created_at"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+}
+
+// Policy is a named, versioned Rego policy stored in the policy admin store.
+type Policy struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Version     string     `json:"version"`
+	Content     string     `json:"content"`
+	ContentHash string     `json:"content_hash"`
+	Active      bool       `json:"active"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ActivatedAt *time.Time `json:"activated_at,omitempty"`
+	// Signature is an ed25519 signature of ContentHash computed at activation time.
+	// Never exposed via API; used internally to detect DB-level tampering.
+	Signature string `json:"-"`
 }
 
 type Session struct {

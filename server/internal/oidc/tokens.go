@@ -13,11 +13,25 @@ import (
 	"furnace/server/internal/personality"
 )
 
-// TokenConfig controls lifetimes for issued tokens.
+// HasuraClaimsConfig injects a Hasura-compatible claim namespace into the ID token.
+type HasuraClaimsConfig struct {
+	Enabled      bool
+	Namespace    string   // defaults to "https://hasura.io/jwt/claims"
+	DefaultRole  string
+	AllowedRoles []string // defaults to user groups when empty
+}
+
+// TokenConfig controls lifetimes and optional claim format for issued tokens.
 type TokenConfig struct {
 	AccessTokenTTL  time.Duration
 	IDTokenTTL      time.Duration
 	RefreshTokenTTL time.Duration
+	// Format flags — all default false (existing behaviour unchanged).
+	IncludeJTI   bool // add jti (unique token ID) to every token
+	AudAsArray   bool // emit aud as ["clientID"] instead of "clientID"
+	IncludeScope bool // add scope claim to access token
+	// Framework integration.
+	HasuraClaims HasuraClaimsConfig
 }
 
 func DefaultTokenConfig() TokenConfig {
@@ -84,19 +98,35 @@ func (i *Issuer) GetTokenConfig() TokenConfig {
 // Issue mints an access token, ID token, and refresh token for the given flow+user.
 func (i *Issuer) Issue(flow domain.Flow, user domain.User) (TokenSet, error) {
 	now := time.Now().UTC()
+	cfg := i.tokenConfig()
 
 	signer, err := i.km.Signer()
 	if err != nil {
 		return TokenSet{}, fmt.Errorf("get signer: %w", err)
 	}
 
-	accessToken, err := i.signJWT(signer, map[string]any{
+	aud := audClaim(flow.ClientID, cfg.AudAsArray)
+	scopeStr := strings.Join(flow.Scopes, " ")
+
+	accessClaims := map[string]any{
 		"iss": i.issuer,
 		"sub": user.ID,
-		"aud": flow.ClientID,
+		"aud": aud,
 		"iat": now.Unix(),
-		"exp": now.Add(i.tokenConfig().AccessTokenTTL).Unix(),
-	})
+		"exp": now.Add(cfg.AccessTokenTTL).Unix(),
+	}
+	if cfg.IncludeJTI {
+		jti, err := randomID(16)
+		if err != nil {
+			return TokenSet{}, fmt.Errorf("generate access token jti: %w", err)
+		}
+		accessClaims["jti"] = jti
+	}
+	if cfg.IncludeScope {
+		accessClaims["scope"] = scopeStr
+	}
+
+	accessToken, err := i.signJWT(signer, accessClaims)
 	if err != nil {
 		return TokenSet{}, fmt.Errorf("sign access token: %w", err)
 	}
@@ -104,11 +134,18 @@ func (i *Issuer) Issue(flow domain.Flow, user domain.User) (TokenSet, error) {
 	idClaims := map[string]any{
 		"iss":   i.issuer,
 		"sub":   user.ID,
-		"aud":   flow.ClientID,
+		"aud":   aud,
 		"iat":   now.Unix(),
-		"exp":   now.Add(i.tokenConfig().IDTokenTTL).Unix(),
+		"exp":   now.Add(cfg.IDTokenTTL).Unix(),
 		"email": user.Email,
 		"name":  user.DisplayName,
+	}
+	if cfg.IncludeJTI {
+		jti, err := randomID(16)
+		if err != nil {
+			return TokenSet{}, fmt.Errorf("generate id token jti: %w", err)
+		}
+		idClaims["jti"] = jti
 	}
 	if flow.Nonce != "" {
 		idClaims["nonce"] = flow.Nonce
@@ -121,6 +158,7 @@ func (i *Issuer) Issue(flow domain.Flow, user domain.User) (TokenSet, error) {
 			idClaims[k] = v
 		}
 	}
+	applyHasuraClaims(idClaims, user, cfg.HasuraClaims)
 
 	idToken, err := i.signJWT(signer, i.personality.Apply(idClaims))
 	if err != nil {
@@ -132,16 +170,50 @@ func (i *Issuer) Issue(flow domain.Flow, user domain.User) (TokenSet, error) {
 		return TokenSet{}, fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	scopeStr := strings.Join(flow.Scopes, " ")
-
 	return TokenSet{
 		AccessToken:  accessToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    int(i.tokenConfig().AccessTokenTTL.Seconds()),
+		ExpiresIn:    int(cfg.AccessTokenTTL.Seconds()),
 		IDToken:      idToken,
 		RefreshToken: refreshToken,
 		Scope:        scopeStr,
 	}, nil
+}
+
+// audClaim returns aud as a bare string or single-element slice depending on cfg.
+func audClaim(clientID string, asArray bool) any {
+	if asArray {
+		return []string{clientID}
+	}
+	return clientID
+}
+
+// applyHasuraClaims injects the Hasura claim namespace into idClaims when configured.
+func applyHasuraClaims(idClaims map[string]any, user domain.User, cfg HasuraClaimsConfig) {
+	if !cfg.Enabled {
+		return
+	}
+	ns := cfg.Namespace
+	if ns == "" {
+		ns = "https://hasura.io/jwt/claims"
+	}
+	roles := cfg.AllowedRoles
+	if len(roles) == 0 {
+		roles = user.Groups
+	}
+	defaultRole := cfg.DefaultRole
+	if defaultRole == "" && len(roles) > 0 {
+		defaultRole = roles[0]
+	}
+	hasura := map[string]any{
+		"x-hasura-default-role":  defaultRole,
+		"x-hasura-allowed-roles": roles,
+		"x-hasura-user-id":       user.ID,
+	}
+	if orgID, ok := user.Claims["org_id"].(string); ok && orgID != "" {
+		hasura["x-hasura-org-id"] = orgID
+	}
+	idClaims[ns] = hasura
 }
 
 // MintedTokens is the response payload for POST /api/v1/tokens/mint.
@@ -155,7 +227,8 @@ type MintedTokens struct {
 // bypassing the OAuth authorization flow. Used by POST /api/v1/tokens/mint.
 // expiresIn is in seconds; if ≤ 0, the issuer's AccessTokenTTL is used.
 func (i *Issuer) MintForUser(user domain.User, clientID string, scopes []string, expiresIn int) (MintedTokens, error) {
-	ttl := i.tokenConfig().AccessTokenTTL
+	cfg := i.tokenConfig()
+	ttl := cfg.AccessTokenTTL
 	if expiresIn > 0 {
 		ttl = time.Duration(expiresIn) * time.Second
 	}
@@ -166,13 +239,27 @@ func (i *Issuer) MintForUser(user domain.User, clientID string, scopes []string,
 		return MintedTokens{}, fmt.Errorf("get signer: %w", err)
 	}
 
-	accessToken, err := i.signJWT(signer, map[string]any{
+	aud := audClaim(clientID, cfg.AudAsArray)
+
+	accessClaims := map[string]any{
 		"iss": i.issuer,
 		"sub": user.ID,
-		"aud": clientID,
+		"aud": aud,
 		"iat": now.Unix(),
 		"exp": now.Add(ttl).Unix(),
-	})
+	}
+	if cfg.IncludeJTI {
+		jti, err := randomID(16)
+		if err != nil {
+			return MintedTokens{}, fmt.Errorf("generate access token jti: %w", err)
+		}
+		accessClaims["jti"] = jti
+	}
+	if cfg.IncludeScope && len(scopes) > 0 {
+		accessClaims["scope"] = strings.Join(scopes, " ")
+	}
+
+	accessToken, err := i.signJWT(signer, accessClaims)
 	if err != nil {
 		return MintedTokens{}, fmt.Errorf("sign access token: %w", err)
 	}
@@ -180,11 +267,18 @@ func (i *Issuer) MintForUser(user domain.User, clientID string, scopes []string,
 	idClaims := map[string]any{
 		"iss":   i.issuer,
 		"sub":   user.ID,
-		"aud":   clientID,
+		"aud":   aud,
 		"iat":   now.Unix(),
 		"exp":   now.Add(ttl).Unix(),
 		"email": user.Email,
 		"name":  user.DisplayName,
+	}
+	if cfg.IncludeJTI {
+		jti, err := randomID(16)
+		if err != nil {
+			return MintedTokens{}, fmt.Errorf("generate id token jti: %w", err)
+		}
+		idClaims["jti"] = jti
 	}
 	if len(user.Groups) > 0 {
 		idClaims["groups"] = user.Groups
@@ -194,6 +288,7 @@ func (i *Issuer) MintForUser(user domain.User, clientID string, scopes []string,
 			idClaims[k] = v
 		}
 	}
+	applyHasuraClaims(idClaims, user, cfg.HasuraClaims)
 
 	idToken, err := i.signJWT(signer, i.personality.Apply(idClaims))
 	if err != nil {

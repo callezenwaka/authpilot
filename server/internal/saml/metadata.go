@@ -213,6 +213,10 @@ func BuildLogoutResponse(entityID, destination, inResponseTo string, cm *CertMan
 
 // acsFromRequest returns the AssertionConsumerServiceURL from the request,
 // falling back to a known list of allowed URLs for the given SP issuer.
+// Furnace has no SP registry, so allowedACS is always nil and the URL
+// presented by the SP is accepted as-is. Callers should enforce network-level
+// constraints (e.g. allow only known SP origins) until SP registration is
+// implemented.
 func acsFromRequest(req *AuthnRequest, allowedACS []string) (string, error) {
 	acs := strings.TrimSpace(req.AssertionConsumerServiceURL)
 	if acs == "" {
@@ -221,7 +225,6 @@ func acsFromRequest(req *AuthnRequest, allowedACS []string) (string, error) {
 		}
 		return "", fmt.Errorf("saml: no AssertionConsumerServiceURL in request and no registered ACS")
 	}
-	// In a local dev IdP we trust whatever URL the SP presents.
 	return acs, nil
 }
 

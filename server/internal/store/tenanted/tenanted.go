@@ -198,6 +198,20 @@ func (s *FlowStore) Delete(id string) error {
 	return s.inner.Delete(addPrefix(s.tenantID, id))
 }
 
+func (s *FlowStore) ConsumeAuthCode(code string) (domain.Flow, error) {
+	f, err := s.inner.ConsumeAuthCode(code)
+	if err != nil {
+		return domain.Flow{}, err
+	}
+	if !hasPrefix(s.tenantID, f.ID) {
+		// auth-code collision across tenants (negligible with cryptographic codes,
+		// but the inner store consumed someone else's code); treat as not-found
+		return domain.Flow{}, store.ErrNotFound
+	}
+	f.ID = stripPrefix(s.tenantID, f.ID)
+	return f, nil
+}
+
 func (s *FlowStore) DeleteExpired(now time.Time) (int, error) {
 	// Delegate to the inner store — it cleans up all tenants' expired flows.
 	// This is intentional: the cleanup scheduler holds a reference to the raw
@@ -309,6 +323,10 @@ func (s *AuditStore) List(filter store.AuditFilter) []domain.AuditEvent {
 		}
 	}
 	return out
+}
+
+func (s *AuditStore) Verify() (store.AuditVerifyResult, error) {
+	return s.inner.Verify()
 }
 
 // ---- StoreSet and Dispatcher ----

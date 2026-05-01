@@ -1,6 +1,7 @@
 package oidc_test
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-jose/go-jose/v4/jwt"
 
 	"furnace/server/internal/domain"
 	"furnace/server/internal/oidc"
@@ -53,6 +56,90 @@ func TestKeyManager_Signer(t *testing.T) {
 	}
 }
 
+func TestKeyManager_KeyStrengthAtLeast3072(t *testing.T) {
+	km, err := oidc.NewKeyManager()
+	if err != nil {
+		t.Fatalf("NewKeyManager: %v", err)
+	}
+	jwks := km.JWKS()
+	if len(jwks.Keys) == 0 {
+		t.Fatal("no keys in JWKS")
+	}
+	pub, ok := jwks.Keys[0].Key.(*rsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected *rsa.PublicKey, got %T", jwks.Keys[0].Key)
+	}
+	if bits := pub.N.BitLen(); bits < 3072 {
+		t.Errorf("RSA key must be at least 3072 bits; got %d", bits)
+	}
+}
+
+// TestKeyManager_RotateOverlap exercises the JWKS overlap window: after a
+// rotation, both the new active key and the previously-active key remain
+// published, and tokens signed before the rotation still verify.
+func TestKeyManager_RotateOverlap(t *testing.T) {
+	km, err := oidc.NewKeyManager()
+	if err != nil {
+		t.Fatalf("NewKeyManager: %v", err)
+	}
+
+	// Sign a token under the original key.
+	signer, err := km.Signer()
+	if err != nil {
+		t.Fatalf("Signer: %v", err)
+	}
+	originalKID := km.JWKS().Keys[0].KeyID
+	oldToken, err := jwt.Signed(signer).Claims(jwt.Claims{
+		Subject: "alice",
+		Expiry:  jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+	}).Serialize()
+	if err != nil {
+		t.Fatalf("serialize old token: %v", err)
+	}
+
+	// Rotate.
+	if err := km.Rotate(); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+
+	jwks := km.JWKS()
+	if len(jwks.Keys) != 2 {
+		t.Fatalf("expected 2 keys in JWKS after one rotation, got %d", len(jwks.Keys))
+	}
+	if jwks.Keys[0].KeyID == originalKID {
+		t.Error("newest key should be at index 0; got the original kid")
+	}
+	if jwks.Keys[1].KeyID != originalKID {
+		t.Errorf("expected previously-active kid at index 1; got %s, want %s",
+			jwks.Keys[1].KeyID, originalKID)
+	}
+
+	// Old token must still verify against the retired key.
+	if _, active, err := km.VerifyJWT(oldToken); err != nil {
+		t.Fatalf("verify old token: %v", err)
+	} else if !active {
+		t.Error("token signed before rotation must still verify inside the overlap window")
+	}
+
+	// New tokens are signed under the new active key.
+	newSigner, err := km.Signer()
+	if err != nil {
+		t.Fatalf("Signer after rotate: %v", err)
+	}
+	newToken, err := jwt.Signed(newSigner).Claims(jwt.Claims{
+		Subject: "bob",
+		Expiry:  jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+	}).Serialize()
+	if err != nil {
+		t.Fatalf("serialize new token: %v", err)
+	}
+	if _, active, err := km.VerifyJWT(newToken); err != nil {
+		t.Fatalf("verify new token: %v", err)
+	} else if !active {
+		t.Error("token signed under new active key failed verification")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // PKCE
 // ---------------------------------------------------------------------------
@@ -67,9 +154,9 @@ func TestVerifyPKCE_S256(t *testing.T) {
 	}
 }
 
-func TestVerifyPKCE_Plain(t *testing.T) {
-	if err := oidc.VerifyPKCE("mysecret", "plain", "mysecret"); err != nil {
-		t.Errorf("plain verify failed: %v", err)
+func TestVerifyPKCE_PlainRejected(t *testing.T) {
+	if err := oidc.VerifyPKCE("mysecret", "plain", "mysecret"); err == nil {
+		t.Error("expected plain method to be rejected")
 	}
 }
 

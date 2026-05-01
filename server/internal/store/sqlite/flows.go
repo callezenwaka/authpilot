@@ -136,6 +136,30 @@ func (s *FlowStore) Update(flow domain.Flow) (domain.Flow, error) {
 	return flow, nil
 }
 
+func (s *FlowStore) ConsumeAuthCode(code string) (domain.Flow, error) {
+	if code == "" {
+		return domain.Flow{}, store.ErrNotFound
+	}
+	// Atomic CAS: SQLite serialises writes, so two concurrent UPDATEs against
+	// the same auth_code produce exactly one match (the second sees '' after
+	// the first commits) and the loser's RETURNING set is empty.
+	row := s.db.QueryRow(`
+		UPDATE flows SET auth_code = ''
+		WHERE auth_code = ?
+		RETURNING id, user_id, state, scenario, attempts, error, protocol,
+		          client_id, redirect_uri, scopes_json, response_type, oauth_state,
+		          nonce, pkce_challenge, pkce_method, auth_code,
+		          totp_secret, sms_code, magic_link_token, magic_link_used,
+		          webauthn_challenge, webauthn_session,
+		          created_at, expires_at, completed_at`, code)
+	flow, err := scanFlow(row)
+	if err != nil {
+		return domain.Flow{}, err
+	}
+	flow.AuthCode = code // RETURNING shows the post-update value (''); restore pre-update for the caller
+	return flow, nil
+}
+
 func (s *FlowStore) Delete(id string) error {
 	res, err := s.db.Exec(`DELETE FROM flows WHERE id = ?`, id)
 	if err != nil {

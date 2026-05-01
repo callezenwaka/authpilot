@@ -2,18 +2,31 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/gorilla/mux"
 
 	"furnace/server/internal/audit"
+	"furnace/server/internal/authevents"
 	"furnace/server/internal/domain"
 	flowengine "furnace/server/internal/flow"
 	"furnace/server/internal/store"
 )
+
+// webAuthnSettings carries the relying-party configuration used by every
+// WebAuthn handler. Both fields are required; the request Host is verified
+// against Origin and a mismatch is rejected.
+type webAuthnSettings struct {
+	RPID   string
+	Origin string
+}
 
 // webAuthnUser wraps domain.User to satisfy webauthn.User.
 type webAuthnUser struct {
@@ -36,30 +49,31 @@ func (u webAuthnUser) WebAuthnName() string          { return u.u.Email }
 func (u webAuthnUser) WebAuthnDisplayName() string   { return u.u.DisplayName }
 func (u webAuthnUser) WebAuthnCredentials() []webauthn.Credential { return u.creds }
 
-// newWebAuthn creates a per-request webauthn.WebAuthn instance derived from the request host.
-func newWebAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
-	host := r.Host
-	if host == "" {
-		host = "localhost"
+// newWebAuthn creates a per-request webauthn.WebAuthn instance.
+// RPID and Origin must be set (FURNACE_WEBAUTHN_RP_ID / FURNACE_WEBAUTHN_ORIGIN);
+// the request Host header is verified against Origin so a spoofable Host cannot
+// break credential origin binding.
+func newWebAuthn(r *http.Request, s webAuthnSettings) (*webauthn.WebAuthn, error) {
+	if s.RPID == "" || s.Origin == "" {
+		return nil, errors.New("FURNACE_WEBAUTHN_RP_ID and FURNACE_WEBAUTHN_ORIGIN must be set")
 	}
-	rpID := host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		rpID = h
+	u, err := url.Parse(s.Origin)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("webauthn origin is not a valid URL")
 	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
+	if !strings.EqualFold(r.Host, u.Host) {
+		return nil, errors.New("Host header does not match configured WebAuthn origin")
 	}
 	return webauthn.New(&webauthn.Config{
-		RPID:          rpID,
+		RPID:          s.RPID,
 		RPDisplayName: "Furnace",
-		RPOrigins:     []string{scheme + "://" + host},
+		RPOrigins:     []string{s.Origin},
 	})
 }
 
 // webauthnBeginRegisterHandler handles GET /api/v1/flows/{id}/webauthn-begin-register.
 // Returns PublicKeyCredentialCreationOptions JSON for navigator.credentials.create().
-func webauthnBeginRegisterHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func webauthnBeginRegisterHandler(flows store.FlowStore, users store.UserStore, s webAuthnSettings) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		flow, err := flows.GetByID(flowID)
@@ -81,7 +95,7 @@ func webauthnBeginRegisterHandler(flows store.FlowStore, users store.UserStore) 
 			writeError(w, http.StatusInternalServerError, "credential_decode_failed", err.Error())
 			return
 		}
-		wa, err := newWebAuthn(r)
+		wa, err := newWebAuthn(r, s)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "webauthn_init_failed", err.Error())
 			return
@@ -107,7 +121,7 @@ func webauthnBeginRegisterHandler(flows store.FlowStore, users store.UserStore) 
 
 // webauthnFinishRegisterHandler handles POST /api/v1/flows/{id}/webauthn-finish-register.
 // Validates the attestation and stores the new credential on the user.
-func webauthnFinishRegisterHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func webauthnFinishRegisterHandler(flows store.FlowStore, users store.UserStore, s webAuthnSettings) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		flow, err := flows.GetByID(flowID)
@@ -134,7 +148,7 @@ func webauthnFinishRegisterHandler(flows store.FlowStore, users store.UserStore)
 			writeError(w, http.StatusInternalServerError, "credential_decode_failed", err.Error())
 			return
 		}
-		wa, err := newWebAuthn(r)
+		wa, err := newWebAuthn(r, s)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "webauthn_init_failed", err.Error())
 			return
@@ -163,7 +177,7 @@ func webauthnFinishRegisterHandler(flows store.FlowStore, users store.UserStore)
 
 // webauthnBeginHandler handles GET /api/v1/flows/{id}/webauthn-begin.
 // Returns PublicKeyCredentialRequestOptions JSON for navigator.credentials.get().
-func webauthnBeginHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func webauthnBeginHandler(flows store.FlowStore, users store.UserStore, s webAuthnSettings) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		flow, err := flows.GetByID(flowID)
@@ -185,7 +199,7 @@ func webauthnBeginHandler(flows store.FlowStore, users store.UserStore) http.Han
 			writeError(w, http.StatusInternalServerError, "credential_decode_failed", err.Error())
 			return
 		}
-		wa, err := newWebAuthn(r)
+		wa, err := newWebAuthn(r, s)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "webauthn_init_failed", err.Error())
 			return
@@ -211,7 +225,7 @@ func webauthnBeginHandler(flows store.FlowStore, users store.UserStore) http.Han
 
 // webauthnResponseHandler handles POST /api/v1/flows/{id}/webauthn-response.
 // Verifies the authenticator assertion and advances the flow from webauthn_pending → mfa_approved.
-func webauthnResponseHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore) http.HandlerFunc {
+func webauthnResponseHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore, s webAuthnSettings, sink authevents.Sink, trustedProxies []*net.IPNet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		flow, err := flows.GetByID(flowID)
@@ -242,13 +256,21 @@ func webauthnResponseHandler(flows store.FlowStore, users store.UserStore, as st
 			writeError(w, http.StatusInternalServerError, "credential_decode_failed", err.Error())
 			return
 		}
-		wa, err := newWebAuthn(r)
+		wa, err := newWebAuthn(r, s)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "webauthn_init_failed", err.Error())
 			return
 		}
 		credential, err := wa.FinishLogin(wu, session, r)
 		if err != nil {
+			sink.Emit(authevents.Event{
+				Time:   time.Now().UTC(),
+				Type:   authevents.TypeWebAuthnFailed,
+				IP:     clientIP(r, trustedProxies),
+				UserID: flow.UserID,
+				FlowID: flowID,
+				Meta:   map[string]any{"reason": err.Error()},
+			})
 			writeError(w, http.StatusBadRequest, "ASSERTION_FAILED", fmt.Sprintf("passkey authentication failed: %v", err))
 			return
 		}

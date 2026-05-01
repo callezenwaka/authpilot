@@ -66,3 +66,16 @@ func (s *AuditStore) List(filter store.AuditFilter) []domain.AuditEvent {
 	}
 	return out
 }
+
+// Verify always returns ok=true for the in-memory store. The ring buffer has
+// no tamper-evident chain; use SQLiteAuditStore for integrity guarantees.
+func (s *AuditStore) Verify() (store.AuditVerifyResult, error) {
+	s.mu.RLock()
+	n := s.size
+	s.mu.RUnlock()
+	return store.AuditVerifyResult{
+		OK:      true,
+		Checked: n,
+		Message: "in-memory store: no tamper-evident chain",
+	}, nil
+}

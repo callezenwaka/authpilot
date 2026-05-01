@@ -38,10 +38,6 @@ func NewRouter(dep RouterDeps) http.Handler {
 		dep.SessionTTL = 1 * time.Hour
 	}
 
-	if dep.SLOURL == "" {
-		dep.SLOURL = dep.EntityID + "/saml/slo"
-	}
-
 	r := mux.NewRouter()
 	r.HandleFunc("/saml/metadata", metadataHandler(dep)).Methods(http.MethodGet)
 	r.HandleFunc("/saml/sso", ssoHandler(dep)).Methods(http.MethodGet, http.MethodPost)

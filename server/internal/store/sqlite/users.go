@@ -15,6 +15,10 @@ type UserStore struct {
 	db *sql.DB
 }
 
+func (s *Store) Policies() *PolicyStore {
+	return &PolicyStore{db: s.db, signer: s.signer}
+}
+
 func (s *Store) Users() *UserStore {
 	return &UserStore{db: s.db}
 }
@@ -26,9 +30,9 @@ func (s *UserStore) Create(user domain.User) (domain.User, error) {
 	}
 
 	_, err = s.db.Exec(`
-		INSERT INTO users (id, email, display_name, groups_json, mfa_method, next_flow, claims_json, phone_number, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, user.ID, user.Email, user.DisplayName, groupsJSON, user.MFAMethod, user.NextFlow, claimsJSON, user.PhoneNumber, user.CreatedAt.UTC().Format(time.RFC3339Nano))
+		INSERT INTO users (id, email, display_name, groups_json, mfa_method, next_flow, claims_json, phone_number, password_hash, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, user.ID, user.Email, user.DisplayName, groupsJSON, user.MFAMethod, user.NextFlow, claimsJSON, user.PhoneNumber, user.PasswordHash, user.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return domain.User{}, fmt.Errorf("insert user: %w", err)
 	}
@@ -37,7 +41,7 @@ func (s *UserStore) Create(user domain.User) (domain.User, error) {
 
 func (s *UserStore) GetByID(id string) (domain.User, error) {
 	row := s.db.QueryRow(`
-		SELECT id, email, display_name, groups_json, mfa_method, next_flow, claims_json, phone_number, created_at
+		SELECT id, email, display_name, groups_json, mfa_method, next_flow, claims_json, phone_number, password_hash, created_at
 		FROM users
 		WHERE id = ?
 	`, id)
@@ -46,7 +50,7 @@ func (s *UserStore) GetByID(id string) (domain.User, error) {
 
 func (s *UserStore) List() ([]domain.User, error) {
 	rows, err := s.db.Query(`
-		SELECT id, email, display_name, groups_json, mfa_method, next_flow, claims_json, phone_number, created_at
+		SELECT id, email, display_name, groups_json, mfa_method, next_flow, claims_json, phone_number, password_hash, created_at
 		FROM users
 	`)
 	if err != nil {
@@ -78,9 +82,9 @@ func (s *UserStore) Update(user domain.User) (domain.User, error) {
 
 	res, err := s.db.Exec(`
 		UPDATE users
-		SET email = ?, display_name = ?, groups_json = ?, mfa_method = ?, next_flow = ?, claims_json = ?, phone_number = ?, created_at = ?
+		SET email = ?, display_name = ?, groups_json = ?, mfa_method = ?, next_flow = ?, claims_json = ?, phone_number = ?, password_hash = ?, created_at = ?
 		WHERE id = ?
-	`, user.Email, user.DisplayName, groupsJSON, user.MFAMethod, user.NextFlow, claimsJSON, user.PhoneNumber, user.CreatedAt.UTC().Format(time.RFC3339Nano), user.ID)
+	`, user.Email, user.DisplayName, groupsJSON, user.MFAMethod, user.NextFlow, claimsJSON, user.PhoneNumber, user.PasswordHash, user.CreatedAt.UTC().Format(time.RFC3339Nano), user.ID)
 	if err != nil {
 		return domain.User{}, fmt.Errorf("update user: %w", err)
 	}
@@ -147,6 +151,7 @@ func scanUser(s scanner) (domain.User, error) {
 		&user.NextFlow,
 		&claimsJSON,
 		&user.PhoneNumber,
+		&user.PasswordHash,
 		&createdAt,
 	)
 	if err != nil {

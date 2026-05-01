@@ -1,13 +1,16 @@
 package httpapi
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"furnace/server/internal/authevents"
 	"furnace/server/internal/store/memory"
 )
 
@@ -175,7 +178,7 @@ func TestRateLimiter_IndependentPerIP(t *testing.T) {
 
 func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	rl := NewRateLimiter(1, time.Minute)
-	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := rateLimitMiddleware(rl, nil, authevents.Noop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -200,7 +203,7 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 
 func TestRateLimitMiddleware_HeadersOn429(t *testing.T) {
 	rl := NewRateLimiter(1, time.Minute)
-	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := rateLimitMiddleware(rl, nil, authevents.Noop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -230,7 +233,7 @@ func TestRateLimitMiddleware_HeadersOn429(t *testing.T) {
 
 func TestRateLimitMiddleware_HeadersOnAllowedRequest(t *testing.T) {
 	rl := NewRateLimiter(10, time.Minute)
-	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := rateLimitMiddleware(rl, nil, authevents.Noop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -342,5 +345,100 @@ func TestIdempotencyMiddleware_DifferentKeys(t *testing.T) {
 
 	if calls != 3 {
 		t.Errorf("different keys should not share cache; handler called %d times, want 3", calls)
+	}
+}
+
+// --- clientIP / trusted-proxy XFF gating ---
+
+func TestClientIP_XFFIgnoredWhenNoTrustedProxies(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "203.0.113.5:54321"
+	r.Header.Set("X-Forwarded-For", "10.10.10.10")
+	if got := clientIP(r, nil); got != "203.0.113.5" {
+		t.Errorf("XFF must be ignored without a trusted-proxy CIDR; got %q want 203.0.113.5", got)
+	}
+}
+
+func TestClientIP_XFFHonouredWhenRemoteIsTrusted(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.7:54321"
+	r.Header.Set("X-Forwarded-For", "203.0.113.42, 10.0.0.7")
+	if got := clientIP(r, []*net.IPNet{cidr}); got != "203.0.113.42" {
+		t.Errorf("XFF should be honoured behind a trusted proxy; got %q want 203.0.113.42", got)
+	}
+}
+
+func TestClientIP_XFFIgnoredWhenRemoteNotTrusted(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "203.0.113.99:54321" // NOT in the trusted CIDR
+	r.Header.Set("X-Forwarded-For", "10.10.10.10")
+	if got := clientIP(r, []*net.IPNet{cidr}); got != "203.0.113.99" {
+		t.Errorf("XFF must be ignored when RemoteAddr is outside trusted CIDR; got %q want 203.0.113.99", got)
+	}
+}
+
+// --- requestIsHTTPS / behind-proxy TLS detection ---
+
+func TestRequestIsHTTPS_DirectTLS(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.TLS = &tls.ConnectionState{} // simulate direct TLS termination
+	if !requestIsHTTPS(r, nil) {
+		t.Error("direct TLS connections must be reported as HTTPS")
+	}
+}
+
+func TestRequestIsHTTPS_NoProxiesIgnoresXFP(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "203.0.113.5:54321"
+	r.Header.Set("X-Forwarded-Proto", "https") // spoofable when no proxy gate
+	if requestIsHTTPS(r, nil) {
+		t.Error("X-Forwarded-Proto must be ignored without a trusted-proxy CIDR")
+	}
+}
+
+func TestRequestIsHTTPS_TrustedProxyXFPHonoured(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.7:54321"
+	r.Header.Set("X-Forwarded-Proto", "https")
+	if !requestIsHTTPS(r, []*net.IPNet{cidr}) {
+		t.Error("X-Forwarded-Proto: https from trusted proxy must mark request HTTPS")
+	}
+}
+
+func TestRequestIsHTTPS_UntrustedProxyXFPIgnored(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "203.0.113.99:54321" // NOT in the trusted CIDR
+	r.Header.Set("X-Forwarded-Proto", "https")
+	if requestIsHTTPS(r, []*net.IPNet{cidr}) {
+		t.Error("X-Forwarded-Proto must be ignored when RemoteAddr is outside trusted CIDR")
+	}
+}
+
+func TestRequestIsHTTPS_TrustedProxyHTTPNotSecure(t *testing.T) {
+	_, cidr, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.7:54321"
+	r.Header.Set("X-Forwarded-Proto", "http")
+	if requestIsHTTPS(r, []*net.IPNet{cidr}) {
+		t.Error("trusted proxy reporting plain HTTP must not be treated as HTTPS")
 	}
 }

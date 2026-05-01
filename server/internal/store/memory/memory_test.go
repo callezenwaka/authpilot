@@ -1,10 +1,13 @@
 package memory
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"furnace/server/internal/domain"
+	"furnace/server/internal/store"
 )
 
 func TestUserCRUD(t *testing.T) {
@@ -58,5 +61,54 @@ func TestFlowCleanup(t *testing.T) {
 	}
 	if removed != 1 {
 		t.Fatalf("expected 1 removed flow, got %d", removed)
+	}
+}
+
+// TestConsumeAuthCode_ConcurrentRedeem verifies the atomic CAS guarantee:
+// when N goroutines race to redeem the same auth code, exactly one wins.
+// Regression test for the lookup-then-update race that allowed code replay.
+func TestConsumeAuthCode_ConcurrentRedeem(t *testing.T) {
+	s := NewFlowStore()
+	now := time.Now().UTC()
+	if _, err := s.Create(domain.Flow{
+		ID:        "flow_race",
+		AuthCode:  "code-xyz",
+		CreatedAt: now,
+		ExpiresAt: now.Add(5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	const goroutines = 64
+	var wg sync.WaitGroup
+	var successes, failures atomic.Int64
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			f, err := s.ConsumeAuthCode("code-xyz")
+			if err == nil && f.ID == "flow_race" {
+				successes.Add(1)
+				return
+			}
+			if err == store.ErrNotFound {
+				failures.Add(1)
+				return
+			}
+			t.Errorf("unexpected error: %v", err)
+		}()
+	}
+	wg.Wait()
+
+	if got := successes.Load(); got != 1 {
+		t.Errorf("expected exactly 1 success, got %d", got)
+	}
+	if got := failures.Load(); got != goroutines-1 {
+		t.Errorf("expected %d failures, got %d", goroutines-1, got)
+	}
+
+	// Code is now consumed; a fresh attempt also fails.
+	if _, err := s.ConsumeAuthCode("code-xyz"); err != store.ErrNotFound {
+		t.Errorf("expected ErrNotFound after consumption, got %v", err)
 	}
 }

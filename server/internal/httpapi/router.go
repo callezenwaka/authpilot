@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,9 +18,11 @@ import (
 	"github.com/gorilla/mux"
 
 	"furnace/server/internal/audit"
+	"furnace/server/internal/authevents"
 	"furnace/server/internal/domain"
 	"furnace/server/internal/export"
 	"furnace/server/internal/notify"
+	opaengine "furnace/server/internal/opa"
 	"furnace/server/internal/store"
 	"furnace/server/internal/store/tenanted"
 )
@@ -73,10 +76,14 @@ type Dependencies struct {
 	Audit           store.AuditStore  // nil = audit disabled
 	AdminStaticDir  string
 	AdminFS         fs.FS  // non-nil in prod builds: serve admin SPA from embedded FS
-	APIKey          string        // empty = local dev mode (no auth required); ignored in multi-tenant mode
+	APIKey          string        // single-tenant API key; required in single mode; ignored in multi-tenant mode (per-tenant keys live in TenantEntries)
 	SCIMKey         string        // separate credential for /scim/v2; falls back to APIKey when empty
 	BaseURL         string        // e.g. "http://localhost:8025" — used for magic link URLs
 	RateLimit       int           // requests per minute per IP; 0 = disabled
+	TrustedProxyCIDRs []*net.IPNet       // X-Forwarded-For honoured only when RemoteAddr is in one of these CIDRs; nil/empty = XFF ignored
+	AuthEventSink   authevents.Sink    // nil = auth events discarded; set to authevents.Noop() or a WriterSink
+	WebAuthnRPID    string             // FURNACE_WEBAUTHN_RP_ID / yaml webauthn.rp_id; required when WebAuthn endpoints are used — empty returns an error at the call site
+	WebAuthnOrigin  string             // FURNACE_WEBAUTHN_ORIGIN / yaml webauthn.origin; required when WebAuthn endpoints are used — empty returns an error at the call site
 	SCIMRouter      http.Handler  // mounted at /scim/v2; nil = disabled
 	TokenMinter     TokenMinter   // nil = /tokens/mint endpoint returns 501
 	ConfigPatcher   ConfigPatcher // nil = /config PATCH returns 501
@@ -97,6 +104,15 @@ type Dependencies struct {
 	// Readiness, if non-nil, is called by GET /ready to check store connectivity.
 	// nil = always ready (memory store).
 	Readiness      func() error
+	// OPAEngine, if non-nil, enables the /api/v1/opa/* endpoints.
+	// nil = OPA endpoints return 404.
+	OPAEngine      *opaengine.Engine
+	// OPAPolicies, if non-nil, enables the /api/v1/opa/policies/* Policy Admin endpoints.
+	// nil = policy endpoints return 404.
+	OPAPolicies    store.PolicyStore
+	// APIKeyStore, if non-nil, enables the /api/v1/api-keys/* endpoints and allows
+	// DB-issued keys to authenticate requests in addition to the static APIKey.
+	APIKeyStore    store.APIKeyStore
 }
 
 // resolveStores returns the correct store set for the request context.
@@ -111,6 +127,10 @@ func (d *Dependencies) resolveStores(ctx context.Context) (store.UserStore, stor
 }
 
 func NewRouter(dep Dependencies) http.Handler {
+	if dep.AuthEventSink == nil {
+		dep.AuthEventSink = authevents.Noop()
+	}
+
 	r := mux.NewRouter()
 	r.Use(requestIDMiddleware)
 	r.Use(instrumentMiddleware)
@@ -124,7 +144,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Handle("/metrics", metricsHandler()).Methods(http.MethodGet)
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		loginPageHandler(flows, users)(w, r)
+		loginPageHandler(flows, users, dep.TrustedProxyCIDRs)(w, r)
 	}).Methods(http.MethodGet)
 	r.HandleFunc("/login/select-user", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
@@ -136,7 +156,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	}).Methods(http.MethodGet)
 	r.HandleFunc("/login/mfa", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		loginMFASubmitHandler(flows, users)(w, r)
+		loginMFASubmitHandler(flows, users, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
 	}).Methods(http.MethodPost)
 	r.HandleFunc("/login/complete", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
@@ -157,14 +177,14 @@ func NewRouter(dep Dependencies) http.Handler {
 
 	api := r.PathPrefix("/api/v1").Subrouter()
 	if dep.TenantStores != nil && len(dep.TenantEntries) > 0 {
-		api.Use(tenantAPIKeyMiddleware(dep.TenantEntries))
+		api.Use(tenantAPIKeyMiddleware(dep.TenantEntries, dep.AuthEventSink, dep.TrustedProxyCIDRs))
 	} else {
-		api.Use(apiKeyMiddleware(dep.APIKey))
+		api.Use(apiKeyMiddleware(dep.APIKey, dep.APIKeyStore, dep.AuthEventSink, dep.TrustedProxyCIDRs))
 	}
 
 	if dep.RateLimit > 0 {
 		rl := NewRateLimiter(dep.RateLimit, time.Minute)
-		api.Use(rateLimitMiddleware(rl))
+		api.Use(rateLimitMiddleware(rl, dep.TrustedProxyCIDRs, dep.AuthEventSink))
 	}
 
 	idempStore := newIdempotencyStore(5 * time.Minute)
@@ -230,7 +250,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/flows/{id}/verify-mfa", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, as := dep.resolveStores(r.Context())
-		verifyMFAFlowHandler(flows, users, as)(w, r)
+		verifyMFAFlowHandler(flows, users, as, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/flows/{id}/approve", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, as := dep.resolveStores(r.Context())
@@ -238,23 +258,24 @@ func NewRouter(dep Dependencies) http.Handler {
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/flows/{id}/deny", func(w http.ResponseWriter, r *http.Request) {
 		_, _, flows, _, as := dep.resolveStores(r.Context())
-		denyFlowHandler(flows, as)(w, r)
+		denyFlowHandler(flows, as, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
 	}).Methods(http.MethodPost)
+	wa := webAuthnSettings{RPID: dep.WebAuthnRPID, Origin: dep.WebAuthnOrigin}
 	api.HandleFunc("/flows/{id}/webauthn-begin-register", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		webauthnBeginRegisterHandler(flows, users)(w, r)
+		webauthnBeginRegisterHandler(flows, users, wa)(w, r)
 	}).Methods(http.MethodGet)
 	api.HandleFunc("/flows/{id}/webauthn-finish-register", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		webauthnFinishRegisterHandler(flows, users)(w, r)
+		webauthnFinishRegisterHandler(flows, users, wa)(w, r)
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/flows/{id}/webauthn-begin", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		webauthnBeginHandler(flows, users)(w, r)
+		webauthnBeginHandler(flows, users, wa)(w, r)
 	}).Methods(http.MethodGet)
 	api.HandleFunc("/flows/{id}/webauthn-response", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, as := dep.resolveStores(r.Context())
-		webauthnResponseHandler(flows, users, as)(w, r)
+		webauthnResponseHandler(flows, users, as, wa, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
 	}).Methods(http.MethodPost)
 
 	api.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
@@ -290,24 +311,43 @@ func NewRouter(dep Dependencies) http.Handler {
 		_, _, _, _, as := dep.resolveStores(r.Context())
 		auditExportHandler(as)(w, r)
 	}).Methods(http.MethodGet)
+	api.HandleFunc("/audit/verify", func(w http.ResponseWriter, r *http.Request) {
+		_, _, _, _, as := dep.resolveStores(r.Context())
+		auditVerifyHandler(as)(w, r)
+	}).Methods(http.MethodGet)
 
 	registerDebugRoutes(api, &dep)
 
 	api.HandleFunc("/scim/events", scimEventsHandler(dep.SCIMEvents)).Methods(http.MethodGet)
+
+	if dep.APIKeyStore != nil {
+		api.HandleFunc("/api-keys", listAPIKeysHandler(dep.APIKeyStore)).Methods(http.MethodGet)
+		api.HandleFunc("/api-keys", createAPIKeyHandler(dep.APIKeyStore)).Methods(http.MethodPost)
+		api.HandleFunc("/api-keys/{id}", getAPIKeyHandler(dep.APIKeyStore)).Methods(http.MethodGet)
+		api.HandleFunc("/api-keys/{id}", revokeAPIKeyHandler(dep.APIKeyStore)).Methods(http.MethodDelete)
+	}
+
+	if dep.OPAEngine != nil {
+		opaengine.NewRouter(opaengine.RouterDeps{
+			Engine:   dep.OPAEngine,
+			Users:    dep.Users,
+			Policies: dep.OPAPolicies,
+		}, r, api)
+	}
 
 	// Mount SCIM 2.0 under /scim/v2 with its own credential.
 	if dep.SCIMRouter != nil {
 		scim := r.PathPrefix("/scim/v2").Subrouter()
 		if dep.TenantStores != nil && len(dep.TenantEntries) > 0 {
 			// Multi mode: resolve tenant from SCIM/API key.
-			scim.Use(tenantAPIKeyMiddleware(dep.TenantEntries))
+			scim.Use(tenantAPIKeyMiddleware(dep.TenantEntries, dep.AuthEventSink, dep.TrustedProxyCIDRs))
 		} else {
 			// Single mode: SCIMKey takes precedence; falls back to APIKey.
 			scimKey := dep.SCIMKey
 			if scimKey == "" {
 				scimKey = dep.APIKey
 			}
-			scim.Use(apiKeyMiddleware(scimKey))
+			scim.Use(apiKeyMiddleware(scimKey, dep.APIKeyStore, dep.AuthEventSink, dep.TrustedProxyCIDRs))
 		}
 		scim.PathPrefix("").Handler(dep.SCIMRouter)
 	}

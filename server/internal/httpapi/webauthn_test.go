@@ -25,10 +25,12 @@ func newWebAuthnTestDeps() (http.Handler, *memory.FlowStore, *memory.UserStore) 
 		panic("seed webauthn user: " + err.Error())
 	}
 	router := NewRouter(Dependencies{
-		Users:    users,
-		Groups:   memory.NewGroupStore(),
-		Flows:    flows,
-		Sessions: memory.NewSessionStore(),
+		Users:          users,
+		Groups:         memory.NewGroupStore(),
+		Flows:          flows,
+		Sessions:       memory.NewSessionStore(),
+		WebAuthnRPID:   "localhost",
+		WebAuthnOrigin: "http://localhost",
 	})
 	return router, flows, users
 }

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,12 +14,26 @@ import (
 	"sync"
 	"time"
 
+	"furnace/server/internal/authevents"
+	"furnace/server/internal/store"
 	"furnace/server/internal/tenant"
 )
 
 type contextKey string
 
-const requestIDKey contextKey = "request_id"
+const (
+	requestIDKey    contextKey = "request_id"
+	apiKeyScopesKey contextKey = "api_key_scopes"
+)
+
+// GetAPIKeyScopes returns the scopes granted to the authenticated DB-issued API key,
+// or nil when the request was authenticated with the static admin key.
+func GetAPIKeyScopes(r *http.Request) []string {
+	if v, ok := r.Context().Value(apiKeyScopesKey).([]string); ok {
+		return v
+	}
+	return nil
+}
 
 // requestIDMiddleware generates a request ID for every incoming request and
 // stores it on the context. The ID is also echoed back in X-Request-ID.
@@ -133,19 +148,26 @@ func (rl *RateLimiter) evict() {
 }
 
 // rateLimitMiddleware returns a middleware that enforces the given RateLimiter.
-// Uses X-Forwarded-For if present, otherwise RemoteAddr.
+// X-Forwarded-For is honoured only when r.RemoteAddr is in one of trustedProxies;
+// otherwise the function returns RemoteAddr's IP. Empty trustedProxies = XFF ignored.
 // All responses include X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset.
 // 429 responses additionally include Retry-After.
-func rateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
+func rateLimitMiddleware(rl *RateLimiter, trustedProxies []*net.IPNet, sink authevents.Sink) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIP(r)
+			ip := clientIP(r, trustedProxies)
 			res := rl.allowWithInfo(ip)
 			resetUnix := res.resetAt.Unix()
 			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
 			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(res.remaining))
 			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetUnix, 10))
 			if !res.allowed {
+				sink.Emit(authevents.Event{
+					Time: time.Now().UTC(),
+					Type: authevents.TypeSignupAbuse,
+					IP:   ip,
+					Meta: map[string]any{"path": r.URL.Path, "limit": rl.limit},
+				})
 				retryAfter := res.resetAt.Unix() - time.Now().Unix()
 				if retryAfter < 1 {
 					retryAfter = 1
@@ -159,17 +181,62 @@ func rateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 	}
 }
 
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.IndexByte(xff, ','); idx >= 0 {
-			return strings.TrimSpace(xff[:idx])
+// clientIP returns the request's client IP. X-Forwarded-For is honoured only
+// when r.RemoteAddr is inside one of the trustedProxies CIDRs — without that
+// gate, any client can spoof the leftmost XFF value to bypass per-IP throttling.
+// Empty trustedProxies = XFF ignored entirely.
+func clientIP(r *http.Request, trustedProxies []*net.IPNet) string {
+	remoteIP := remoteAddrIP(r.RemoteAddr)
+	if len(trustedProxies) > 0 && remoteIP != "" && ipInCIDRs(remoteIP, trustedProxies) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if idx := strings.IndexByte(xff, ','); idx >= 0 {
+				return strings.TrimSpace(xff[:idx])
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
-	if idx := strings.LastIndexByte(r.RemoteAddr, ':'); idx >= 0 {
-		return r.RemoteAddr[:idx]
+	return remoteIP
+}
+
+// remoteAddrIP strips the port suffix from r.RemoteAddr ("ip:port" or "[v6]:port").
+func remoteAddrIP(remoteAddr string) string {
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return h
 	}
-	return r.RemoteAddr
+	return remoteAddr
+}
+
+// ipInCIDRs reports whether ip falls inside any of the CIDRs.
+func ipInCIDRs(ip string, cidrs []*net.IPNet) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, c := range cidrs {
+		if c.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+// requestIsHTTPS reports whether the original client→edge connection used TLS.
+// True when the Go server itself terminated TLS (r.TLS != nil) or when the
+// request came from a trusted proxy that set X-Forwarded-Proto: https.
+// X-Forwarded-Proto from an untrusted RemoteAddr is ignored — same trust model
+// as clientIP. Used to set the Secure flag on cookies correctly behind LBs.
+func requestIsHTTPS(r *http.Request, trustedProxies []*net.IPNet) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if len(trustedProxies) == 0 {
+		return false
+	}
+	remoteIP := remoteAddrIP(r.RemoteAddr)
+	if remoteIP == "" || !ipInCIDRs(remoteIP, trustedProxies) {
+		return false
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // --- Idempotency key caching ---
@@ -295,20 +362,49 @@ func extractAPIKey(r *http.Request) string {
 	return ""
 }
 
-// apiKeyMiddleware protects /api/v1/* routes when a key is configured.
-// If apiKey is empty the middleware is a no-op (local dev mode).
-func apiKeyMiddleware(apiKey string) func(http.Handler) http.Handler {
+// apiKeyMiddleware protects /api/v1/* routes.
+// Authentication succeeds when either:
+//   - the incoming key matches the static apiKey, or
+//   - keyStore is non-nil and the key's SHA-256 hash resolves to an active (non-revoked) DB key.
+//
+// Authenticated DB keys have their scopes injected into the request context
+// (readable via GetAPIKeyScopes) and their last_used_at updated asynchronously.
+func apiKeyMiddleware(apiKey string, keyStore store.APIKeyStore, sink authevents.Sink, trustedProxies []*net.IPNet) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if apiKey == "" {
+			incoming := extractAPIKey(r)
+
+			// No auth configured — pass through (dev/test mode).
+			if apiKey == "" && keyStore == nil {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if extractAPIKey(r) != apiKey {
-				writeAPIError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid api key", false)
+
+			// Static key match — full access, no scope injection.
+			if apiKey != "" && incoming == apiKey {
+				next.ServeHTTP(w, r)
 				return
 			}
-			next.ServeHTTP(w, r)
+
+			// DB key lookup.
+			if keyStore != nil && incoming != "" {
+				hash := APIKeyHash(incoming)
+				k, err := keyStore.GetByHash(hash)
+				if err == nil && k.RevokedAt == nil {
+					ctx := context.WithValue(r.Context(), apiKeyScopesKey, k.Scopes)
+					go func() { _ = keyStore.UpdateLastUsed(k.ID, time.Now().UTC()) }()
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+
+			sink.Emit(authevents.Event{
+				Time: time.Now().UTC(),
+				Type: authevents.TypeKeyRejected,
+				IP:   clientIP(r, trustedProxies),
+				Meta: map[string]any{"path": r.URL.Path},
+			})
+			writeAPIError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid api key", false)
 		})
 	}
 }
@@ -322,7 +418,7 @@ type TenantEntry struct {
 
 // tenantAPIKeyMiddleware resolves the request's API key to a tenant ID and
 // stores it on the context. Used only in multi-tenant mode.
-func tenantAPIKeyMiddleware(tenants []TenantEntry) func(http.Handler) http.Handler {
+func tenantAPIKeyMiddleware(tenants []TenantEntry, sink authevents.Sink, trustedProxies []*net.IPNet) func(http.Handler) http.Handler {
 	// Build O(1) lookup maps.
 	byAPIKey := make(map[string]TenantEntry, len(tenants))
 	bySCIMKey := make(map[string]TenantEntry, len(tenants))
@@ -340,6 +436,12 @@ func tenantAPIKeyMiddleware(tenants []TenantEntry) func(http.Handler) http.Handl
 				entry, ok = bySCIMKey[key]
 			}
 			if !ok {
+				sink.Emit(authevents.Event{
+					Time: time.Now().UTC(),
+					Type: authevents.TypeKeyRejected,
+					IP:   clientIP(r, trustedProxies),
+					Meta: map[string]any{"path": r.URL.Path},
+				})
 				writeAPIError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid api key", false)
 				return
 			}

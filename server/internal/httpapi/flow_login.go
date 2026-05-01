@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"furnace/server/internal/audit"
+	"furnace/server/internal/authevents"
 	"furnace/server/internal/domain"
 	flowengine "furnace/server/internal/flow"
 	"furnace/server/internal/store"
@@ -113,12 +115,12 @@ func selectUserFlowHandler(flows store.FlowStore, users store.UserStore, as stor
 			writeError(w, status, code, msg)
 			return
 		}
-		emitFlowStateAudit(as, updated)
+		emitFlowStateAudit(as, authevents.Noop(), "", updated)
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
 
-func verifyMFAFlowHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore) http.HandlerFunc {
+func verifyMFAFlowHandler(flows store.FlowStore, users store.UserStore, as store.AuditStore, sink authevents.Sink, trustedProxies []*net.IPNet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		req, err := decodeFlowMutationRequest(r)
@@ -128,10 +130,19 @@ func verifyMFAFlowHandler(flows store.FlowStore, users store.UserStore, as store
 		}
 		updated, status, code, msg := applyVerifyMFA(flows, users, flowID, req.Code, req.ExpectedState)
 		if status != 0 {
+			if code == "mfa_code_invalid" {
+				sink.Emit(authevents.Event{
+					Time:   time.Now().UTC(),
+					Type:   authevents.TypeMFAMismatch,
+					IP:     clientIP(r, trustedProxies),
+					FlowID: flowID,
+					Meta:   map[string]any{"reason": code},
+				})
+			}
 			writeError(w, status, code, msg)
 			return
 		}
-		emitFlowStateAudit(as, updated)
+		emitFlowStateAudit(as, sink, clientIP(r, trustedProxies), updated)
 		writeJSON(w, http.StatusOK, updated)
 	}
 }
@@ -149,12 +160,12 @@ func approveFlowHandler(flows store.FlowStore, users store.UserStore, as store.A
 			writeError(w, status, code, msg)
 			return
 		}
-		emitFlowStateAudit(as, flow)
+		emitFlowStateAudit(as, authevents.Noop(), "", flow)
 		writeJSON(w, http.StatusOK, flow)
 	}
 }
 
-func denyFlowHandler(flows store.FlowStore, as store.AuditStore) http.HandlerFunc {
+func denyFlowHandler(flows store.FlowStore, as store.AuditStore, sink authevents.Sink, trustedProxies []*net.IPNet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := mux.Vars(r)["id"]
 		req, err := decodeFlowMutationRequest(r)
@@ -167,12 +178,12 @@ func denyFlowHandler(flows store.FlowStore, as store.AuditStore) http.HandlerFun
 			writeError(w, status, code, msg)
 			return
 		}
-		emitFlowStateAudit(as, flow)
+		emitFlowStateAudit(as, sink, clientIP(r, trustedProxies), flow)
 		writeJSON(w, http.StatusOK, flow)
 	}
 }
 
-func loginPageHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func loginPageHandler(flows store.FlowStore, users store.UserStore, trustedProxies []*net.IPNet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flowID := strings.TrimSpace(r.URL.Query().Get("flow_id"))
 		if flowID == "" {
@@ -214,6 +225,7 @@ func loginPageHandler(flows store.FlowStore, users store.UserStore) http.Handler
 			Path:     "/login",
 			SameSite: http.SameSiteStrictMode,
 			HttpOnly: true,
+			Secure:   requestIsHTTPS(r, trustedProxies),
 		})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		tmpl, err := web.ParseTemplate("login.html")
@@ -296,7 +308,7 @@ func loginMFAHandler(flows store.FlowStore, users store.UserStore) http.HandlerF
 	}
 }
 
-func loginMFASubmitHandler(flows store.FlowStore, users store.UserStore) http.HandlerFunc {
+func loginMFASubmitHandler(flows store.FlowStore, users store.UserStore, sink authevents.Sink, trustedProxies []*net.IPNet) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_form", err.Error())
@@ -304,8 +316,17 @@ func loginMFASubmitHandler(flows store.FlowStore, users store.UserStore) http.Ha
 		}
 		flowID := strings.TrimSpace(r.URL.Query().Get("flow_id"))
 		code := strings.TrimSpace(r.FormValue("code"))
-		_, status, _, msg := applyVerifyMFA(flows, users, flowID, code, "")
+		_, status, errCode, msg := applyVerifyMFA(flows, users, flowID, code, "")
 		if status != 0 {
+			if errCode == "mfa_code_invalid" {
+				sink.Emit(authevents.Event{
+					Time:   time.Now().UTC(),
+					Type:   authevents.TypeMFAMismatch,
+					IP:     clientIP(r, trustedProxies),
+					FlowID: flowID,
+					Meta:   map[string]any{"reason": errCode},
+				})
+			}
 			flow, _ := flows.GetByID(flowID)
 			user, _ := users.GetByID(flow.UserID)
 			tmpl, err := web.ParseTemplate("mfa.html")
@@ -544,16 +565,33 @@ func getAndAutoAdvanceFlow(flows store.FlowStore, flowID string) (domain.Flow, e
 	return flow, nil
 }
 
-// emitFlowStateAudit fires an audit event for terminal and key flow states.
-func emitFlowStateAudit(as store.AuditStore, flow domain.Flow) {
+// emitFlowStateAudit fires an audit event for terminal and key flow states,
+// and emits a login_failed auth event when the flow is conclusively denied.
+func emitFlowStateAudit(as store.AuditStore, sink authevents.Sink, ip string, flow domain.Flow) {
 	var eventType string
 	switch flowengine.State(flow.State) {
 	case flowengine.StateComplete:
 		eventType = audit.EventFlowComplete
 	case flowengine.StateMFADenied:
 		eventType = audit.EventFlowDenied
+		sink.Emit(authevents.Event{
+			Time:   time.Now().UTC(),
+			Type:   authevents.TypeLoginFailed,
+			IP:     ip,
+			UserID: flow.UserID,
+			FlowID: flow.ID,
+			Meta:   map[string]any{"reason": "mfa_denied", "scenario": flow.Scenario},
+		})
 	case flowengine.StateError:
 		eventType = audit.EventFlowError
+		sink.Emit(authevents.Event{
+			Time:   time.Now().UTC(),
+			Type:   authevents.TypeLoginFailed,
+			IP:     ip,
+			UserID: flow.UserID,
+			FlowID: flow.ID,
+			Meta:   map[string]any{"reason": "flow_error", "scenario": flow.Scenario},
+		})
 	default:
 		return
 	}

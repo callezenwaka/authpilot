@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	signer *policySigner
 }
 
 func New(path string) (*Store, error) {
@@ -28,6 +30,12 @@ func New(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	signer, err := loadOrCreateSigner(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("policy signer: %w", err)
+	}
+	store.signer = signer
 	return store, nil
 }
 
@@ -98,10 +106,54 @@ func (s *Store) migrate() error {
 			created_at TEXT NOT NULL,
 			expires_at TEXT NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS opa_policies (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			content TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			active INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			activated_at TEXT
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS opa_policies_name_version ON opa_policies (name, version);`,
+		`CREATE TABLE IF NOT EXISTS api_keys (
+			id TEXT PRIMARY KEY,
+			label TEXT NOT NULL,
+			key_hash TEXT NOT NULL UNIQUE,
+			scopes_json TEXT NOT NULL DEFAULT '[]',
+			created_at TEXT NOT NULL,
+			revoked_at TEXT,
+			last_used_at TEXT
+		);`,
+		// furnace_settings is a generic KV store for internal config (e.g. signing keys).
+		`CREATE TABLE IF NOT EXISTS furnace_settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);`,
+		// audit_log is append-only; no UPDATE or DELETE are ever issued by the store layer.
+		// chain_hash links each row to all preceding rows for tamper-evidence.
+		`CREATE TABLE IF NOT EXISTS audit_log (
+			id TEXT PRIMARY KEY,
+			timestamp TEXT NOT NULL,
+			event_json TEXT NOT NULL,
+			chain_hash TEXT NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS audit_log_timestamp ON audit_log (timestamp);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return fmt.Errorf("sqlite migration failed: %w", err)
+		}
+	}
+	// Additive column migrations — idempotent via "duplicate column" error suppression.
+	addCols := []string{
+		`ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE opa_policies ADD COLUMN signature TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range addCols {
+		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("sqlite column migration failed: %w", err)
 		}
 	}
 	return nil

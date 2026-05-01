@@ -66,6 +66,23 @@ func (s *FlowStore) Delete(id string) error {
 	return nil
 }
 
+func (s *FlowStore) ConsumeAuthCode(code string) (domain.Flow, error) {
+	if code == "" {
+		return domain.Flow{}, store.ErrNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, flow := range s.flows {
+		if flow.AuthCode == code {
+			consumed := flow
+			flow.AuthCode = ""
+			s.flows[id] = flow
+			return consumed, nil
+		}
+	}
+	return domain.Flow{}, store.ErrNotFound
+}
+
 func (s *FlowStore) DeleteExpired(now time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

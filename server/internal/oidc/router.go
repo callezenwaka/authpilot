@@ -1,6 +1,8 @@
 package oidc
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -16,6 +18,23 @@ import (
 	"furnace/server/internal/store"
 )
 
+// hashRefreshToken returns the at-rest representation of a refresh token: the
+// HMAC-SHA256 of the opaque value, base64url-encoded. The raw token never
+// reaches the session store; only the hash does. A store dump reveals nothing
+// usable for replay.
+func hashRefreshToken(token string, key []byte) string {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// HeaderMapping declares one response header to inject on /userinfo responses.
+type HeaderMapping struct {
+	Name  string // HTTP header name, e.g. "X-User-Email"
+	Claim string // userinfo claim key, e.g. "email"
+	Join  string // separator when the claim is []any; defaults to ","
+}
+
 // RouterDeps groups everything the OIDC router needs.
 type RouterDeps struct {
 	Flows              store.FlowStore
@@ -23,9 +42,11 @@ type RouterDeps struct {
 	Sessions           store.SessionStore
 	KeyMgr             *KeyManager
 	Issuer             *Issuer
-	IssuerURL          string // e.g. "http://localhost:8026"
-	LoginURL           string // e.g. "http://localhost:8025/login"
-	HeaderPropagation  bool   // inject X-User-* headers on /userinfo responses
+	IssuerURL          string          // e.g. "http://localhost:8026"
+	LoginURL           string          // e.g. "http://localhost:8025/login"
+	HeaderPropagation  bool            // inject X-User-* headers on /userinfo responses
+	HeaderMappings     []HeaderMapping // custom mappings; overrides default X-User-* when non-empty
+	SessionHashKey     []byte          // HMAC key for at-rest hashing of refresh tokens; required (validated upstream in config)
 }
 
 func NewRouter(dep RouterDeps) http.Handler {
@@ -65,7 +86,7 @@ func discoveryHandler(dep RouterDeps) http.HandlerFunc {
 			"token_endpoint_auth_methods_supported": []string{"client_secret_post", "client_secret_basic", "none"},
 			"claims_supported":                      []string{"sub", "iss", "aud", "exp", "iat", "email", "name", "groups"},
 			"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
-			"code_challenge_methods_supported":      []string{"S256", "plain"},
+			"code_challenge_methods_supported":      []string{"S256"},
 		})
 	}
 }
@@ -111,6 +132,10 @@ func authorizeHandler(dep RouterDeps) http.HandlerFunc {
 		}
 		if challenge == "" {
 			redirectWithError(w, r, redirectURI, state, "invalid_request", "code_challenge is required (PKCE mandatory)")
+			return
+		}
+		if challengeMethod != "" && !strings.EqualFold(challengeMethod, "S256") {
+			redirectWithError(w, r, redirectURI, state, "invalid_request", "code_challenge_method must be S256 (plain is not supported)")
 			return
 		}
 
@@ -228,20 +253,10 @@ func handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps)
 		return
 	}
 
-	// Find the flow by auth code — scan all flows (small set in dev).
-	flows, err := dep.Flows.List()
+	// Atomically consume the auth code: ConsumeAuthCode clears it in storage
+	// and returns the flow. Concurrent redemption attempts: exactly one wins.
+	matched, err := dep.Flows.ConsumeAuthCode(code)
 	if err != nil {
-		writeOAuthError(w, http.StatusInternalServerError, "server_error", "flow lookup failed")
-		return
-	}
-	var matched *domain.Flow
-	for idx := range flows {
-		if flows[idx].AuthCode == code {
-			matched = &flows[idx]
-			break
-		}
-	}
-	if matched == nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "code not found or already redeemed")
 		return
 	}
@@ -270,7 +285,7 @@ func handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps)
 	}
 
 	// Check expired_token scenario — issue a token that expires immediately.
-	flow := *matched
+	flow := matched
 	issuer := dep.Issuer
 	if flowengine.NormalizeScenario(flow.Scenario) == flowengine.ScenarioExpiredToken {
 		// Temporarily swap in a 0-second TTL config for this issuance.
@@ -288,10 +303,6 @@ func handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps)
 		return
 	}
 
-	// Consume the auth code.
-	matched.AuthCode = ""
-	_, _ = dep.Flows.Update(*matched)
-
 	// Create a session record, binding the refresh token to it.
 	now := time.Now().UTC()
 	session := domain.Session{
@@ -300,7 +311,7 @@ func handleAuthCodeGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps)
 		FlowID:       matched.ID,
 		Protocol:     matched.Protocol,
 		ClientID:     matched.ClientID,
-		RefreshToken: tokens.RefreshToken,
+		RefreshToken: hashRefreshToken(tokens.RefreshToken, dep.SessionHashKey),
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(dep.Issuer.tokenConfig().RefreshTokenTTL),
 		Events: []domain.SessionEvent{
@@ -321,7 +332,7 @@ func handleRefreshGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps) 
 		return
 	}
 
-	session, err := dep.Sessions.GetByRefreshToken(incomingToken)
+	session, err := dep.Sessions.GetByRefreshToken(hashRefreshToken(incomingToken, dep.SessionHashKey))
 	if err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token not found or already rotated")
 		return
@@ -350,7 +361,7 @@ func handleRefreshGrant(w http.ResponseWriter, r *http.Request, dep RouterDeps) 
 	}
 
 	// Rotate: replace the old refresh token on the session.
-	session.RefreshToken = tokens.RefreshToken
+	session.RefreshToken = hashRefreshToken(tokens.RefreshToken, dep.SessionHashKey)
 	session.ExpiresAt = time.Now().UTC().Add(dep.Issuer.tokenConfig().RefreshTokenTTL)
 	session.Events = append(session.Events, domain.SessionEvent{
 		Timestamp: time.Now().UTC(),
@@ -406,9 +417,17 @@ func userinfoHandler(dep RouterDeps) http.HandlerFunc {
 		}
 
 		if dep.HeaderPropagation {
-			w.Header().Set("X-User-ID", user.ID)
-			w.Header().Set("X-User-Email", user.Email)
-			w.Header().Set("X-User-Groups", strings.Join(user.Groups, ","))
+			if len(dep.HeaderMappings) > 0 {
+				for _, m := range dep.HeaderMappings {
+					if val := resolveHeaderClaim(claims, m.Claim, m.Join); val != "" {
+						w.Header().Set(m.Name, val)
+					}
+				}
+			} else {
+				w.Header().Set("X-User-ID", user.ID)
+				w.Header().Set("X-User-Email", user.Email)
+				w.Header().Set("X-User-Groups", strings.Join(user.Groups, ","))
+			}
 		}
 
 		writeJSON(w, http.StatusOK, claims)
@@ -418,6 +437,30 @@ func userinfoHandler(dep RouterDeps) http.HandlerFunc {
 // ---------------------------------------------------------------------------
 // Introspect — RFC 7662
 // ---------------------------------------------------------------------------
+
+// resolveHeaderClaim extracts a claim value from the userinfo map and returns
+// it as a string. []any values are joined with sep (defaulting to ",").
+func resolveHeaderClaim(claims map[string]any, key, sep string) string {
+	if sep == "" {
+		sep = ","
+	}
+	v, ok := claims[key]
+	if !ok {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case []any:
+		parts := make([]string, 0, len(val))
+		for _, s := range val {
+			parts = append(parts, fmt.Sprint(s))
+		}
+		return strings.Join(parts, sep)
+	default:
+		return fmt.Sprint(val)
+	}
+}
 
 // introspectHandler implements POST /oauth2/introspect (RFC 7662).
 // No auth is required — the endpoint is designed for reverse-proxy use cases

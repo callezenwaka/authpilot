@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,10 +23,35 @@ const (
 
 // TenantConfig defines one tenant in multi-tenant mode.
 type TenantConfig struct {
-	ID           string `yaml:"id"`
-	APIKey       string `yaml:"api_key"`
-	SCIMKey      string `yaml:"scim_key"`        // optional; falls back to APIKey
-	OIDCIssuerURL string `yaml:"oidc_issuer_url"` // optional; overrides global OIDC issuer
+	ID            string `yaml:"id"`
+	APIKey        string `json:"-" yaml:"api_key"`
+	SCIMKey       string `json:"-" yaml:"scim_key"` // optional; falls back to APIKey
+	OIDCIssuerURL string `yaml:"oidc_issuer_url"`   // optional; overrides global OIDC issuer
+}
+
+// MarshalYAML redacts the API key and SCIM key fields when a TenantConfig is
+// emitted to YAML (debug dumps, status endpoints). The struct is still loaded
+// from YAML normally — Unmarshal does not invoke MarshalYAML — so multi-tenant
+// configuration keeps working. Empty fields stay empty so unset values don't
+// look like redacted secrets.
+func (t TenantConfig) MarshalYAML() (interface{}, error) {
+	redact := func(v string) string {
+		if v == "" {
+			return ""
+		}
+		return "<redacted>"
+	}
+	return struct {
+		ID            string `yaml:"id"`
+		APIKey        string `yaml:"api_key"`
+		SCIMKey       string `yaml:"scim_key,omitempty"`
+		OIDCIssuerURL string `yaml:"oidc_issuer_url,omitempty"`
+	}{
+		ID:            t.ID,
+		APIKey:        redact(t.APIKey),
+		SCIMKey:       redact(t.SCIMKey),
+		OIDCIssuerURL: t.OIDCIssuerURL,
+	}, nil
 }
 
 // SeedUser is a user definition used for startup pre-seeding.
@@ -50,17 +76,33 @@ type Config struct {
 	Cleanup      CleanupConfig     `yaml:"cleanup"`
 	OIDC         OIDCConfig        `yaml:"oidc"`
 	SAML         SAMLConfig        `yaml:"saml"`
-	APIKey            string        `yaml:"api_key"`            // empty = local dev mode (no auth); ignored in multi-tenant mode
-	SCIMKey           string        `yaml:"scim_key"`           // separate credential for /scim/v2; falls back to APIKey when empty
+	WebAuthn     WebAuthnConfig    `yaml:"webauthn"`
+	APIKey            string        `json:"-" yaml:"-"`         // FURNACE_API_KEY; required in single-tenant mode (per-tenant keys in tenants[] in multi-tenant mode)
+	SCIMKey           string        `json:"-" yaml:"-"`         // FURNACE_SCIM_KEY; separate credential for /scim/v2; falls back to APIKey when empty
+	SessionHashKey    []byte        `json:"-" yaml:"-"`         // FURNACE_SESSION_HASH_KEY (base64, 32+ bytes); required; HMAC key for at-rest hashing of refresh tokens
+	AuthEventLog      string        `json:"-" yaml:"-"`         // FURNACE_AUTH_EVENT_LOG; "" or "stderr" = stderr; file path = append to that file
 	RateLimit         int           `yaml:"rate_limit"`         // requests/min per IP on /api/v1; 0 = disabled
 	CORSOrigins       []string      `yaml:"cors_origins"`       // FURNACE_CORS_ORIGINS; allowed origins for protocol server; empty = "*"
+	TrustedProxyCIDRs []string      `yaml:"trusted_proxy_cidrs"` // FURNACE_TRUSTED_PROXY_CIDRS; X-Forwarded-For honoured only when RemoteAddr is in one of these CIDRs; empty = XFF ignored
 	SeedUsers         []SeedUser    `yaml:"seed_users"`         // users created at startup; idempotent
-	HeaderPropagation bool          `yaml:"header_propagation"` // inject X-User-* headers on /userinfo responses
-	Tenancy           TenancyMode    `yaml:"tenancy"`            // "single" (default) or "multi"
+	HeaderPropagation bool                 `yaml:"header_propagation"`  // inject X-User-* headers on /userinfo responses
+	HeaderMappings    []HeaderMappingConfig `yaml:"header_mappings"`     // custom header→claim mappings; overrides default X-User-* when non-empty
+	Tokens            TokensConfig          `yaml:"tokens"`              // token format flags and framework claim configs
+	OPA               OPAConfig             `yaml:"opa"`                 // embedded OPA engine settings
+	Tenancy           TenancyMode           `yaml:"tenancy"`             // "single" (default) or "multi"
 	Tenants           []TenantConfig `yaml:"tenants"`            // populated only in multi mode
 	Provider          string         `yaml:"provider"`           // personality ID: "default", "okta", "azure-ad", etc.
 	SCIMClientMode    bool           `yaml:"scim_client_mode"`   // true when FURNACE_SCIM_MODE=client
 	SCIMTargetURL     string         `yaml:"scim_target_url"`    // FURNACE_SCIM_TARGET; required when SCIMClientMode=true
+}
+
+// WebAuthnConfig pins the relying-party identifiers used by all WebAuthn
+// endpoints. Both fields are required when WebAuthn is in use; the request
+// Host header is verified against Origin so a spoofable Host cannot break
+// credential origin binding.
+type WebAuthnConfig struct {
+	RPID   string `yaml:"rp_id"`  // FURNACE_WEBAUTHN_RP_ID; e.g. "app.furnace.io"
+	Origin string `yaml:"origin"` // FURNACE_WEBAUTHN_ORIGIN; e.g. "https://app.furnace.io"
 }
 
 type SAMLConfig struct {
@@ -77,6 +119,107 @@ type OIDCConfig struct {
 	AccessTokenTTL  time.Duration `yaml:"access_token_ttl"`
 	IDTokenTTL      time.Duration `yaml:"id_token_ttl"`
 	RefreshTokenTTL time.Duration `yaml:"refresh_token_ttl"`
+	// KeyRotationInterval is how often the OIDC signing key is rotated.
+	// 0 (default) disables automatic rotation. Set via FURNACE_KEY_ROTATION_INTERVAL.
+	KeyRotationInterval time.Duration `yaml:"key_rotation_interval"`
+	// KeyRotationOverlap is how long a retired key stays published in JWKS
+	// after rotation, giving downstream JWKS caches time to refresh.
+	// Defaults to 24h. Set via FURNACE_KEY_ROTATION_OVERLAP.
+	KeyRotationOverlap time.Duration `yaml:"key_rotation_overlap"`
+}
+
+// OPA default limits
+const (
+	OPADefaultCompileTimeout = 2 * time.Second
+	OPADefaultEvalTimeout    = 5 * time.Second
+	OPADefaultMaxPolicyBytes = int64(64 * 1024)       // 64 KiB
+	OPADefaultMaxDataBytes   = int64(5 * 1024 * 1024) // 5 MiB
+	OPADefaultMaxBatchChecks = 100
+)
+
+// OPATenantBudget defines per-tenant OPA resource limits.
+// All fields are optional (zero = use global default).
+// Per-tenant budgets can only be equal to or tighter than the global limits —
+// the engine takes min(global, per-tenant) for each field so a misconfigured
+// override cannot loosen protection. Configurable via YAML only; there is no
+// env-var representation for this nested map.
+type OPATenantBudget struct {
+	EvalTimeout    time.Duration `yaml:"eval_timeout"`
+	CompileTimeout time.Duration `yaml:"compile_timeout"`
+	MaxPolicyBytes int64         `yaml:"max_policy_bytes"`
+	MaxDataBytes   int64         `yaml:"max_data_bytes"`
+	MaxBatchChecks int           `yaml:"max_batch_checks"`
+}
+
+// OPAConfig holds all OPA integration settings.
+type OPAConfig struct {
+	CompileTimeout  time.Duration              `yaml:"compile_timeout"`   // default 2s
+	EvalTimeout     time.Duration              `yaml:"eval_timeout"`      // default 5s
+	MaxPolicyBytes  int64                      `yaml:"max_policy_bytes"`  // default 64 KiB
+	MaxDataBytes    int64                      `yaml:"max_data_bytes"`    // default 5 MiB
+	MaxBatchChecks  int                        `yaml:"max_batch_checks"`  // default 100
+	MaxConcurrent   int                        `yaml:"max_concurrent"`    // semaphore size; default runtime.NumCPU()
+	DecisionLog     OPADecisionLogConfig       `yaml:"decision_log"`
+	TenantBudgets   map[string]OPATenantBudget `yaml:"tenant_budgets"`    // per-tenant overrides; only tighter than global
+}
+
+// OPADecisionLogConfig controls what the OPA decision log records.
+type OPADecisionLogConfig struct {
+	Enabled       bool   `yaml:"enabled"`        // default true
+	IncludeInput  bool   `yaml:"include_input"`  // default false — opt-in to avoid PII leaks in shared deployments
+	IncludePolicy bool   `yaml:"include_policy"` // default false — policy text can be large
+	Destination   string `yaml:"destination"`    // "stdout" (default) | "stderr" | file path
+
+	// PII and credential controls.
+	// RedactFields is a list of dot-separated paths in Input to replace with "[REDACTED]"
+	// before writing the log entry. e.g. ["user.claims.email", "user.claims.ssn"].
+	RedactFields []string `yaml:"redact_fields"`
+	// ScrubPolicyCredentials removes patterns that look like credentials (bearer tokens,
+	// base64 secrets, password assignments) from the policy text before logging.
+	// Only applies when include_policy is true.
+	ScrubPolicyCredentials bool `yaml:"scrub_policy_credentials"`
+
+	// Retention. RetentionDays > 0 enables startup pruning of log entries older than
+	// N days. Only applies when Destination is a file path.
+	RetentionDays int `yaml:"retention_days"`
+}
+
+// TokenFormatConfig controls optional JWT claim fields for API gateway compatibility.
+type TokenFormatConfig struct {
+	IncludeJTI   bool `yaml:"include_jti"`   // add jti (unique token ID) to every token
+	AudAsArray   bool `yaml:"aud_as_array"`  // emit aud as ["clientID"] instead of "clientID"
+	IncludeScope bool `yaml:"include_scope"` // add scope claim to access token
+}
+
+// HasuraClaimsConfig injects a Hasura-compatible claim namespace into the ID token.
+type HasuraClaimsConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	Namespace    string   `yaml:"namespace"`     // defaults to "https://hasura.io/jwt/claims"
+	DefaultRole  string   `yaml:"default_role"`
+	AllowedRoles []string `yaml:"allowed_roles"` // defaults to user groups when empty
+}
+
+// ApolloClaimsConfig declares which JWT claims Apollo Federation resolvers should read.
+// This is a routing hint only — no token changes are made.
+type ApolloClaimsConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	UserIDClaim string `yaml:"user_id_claim"` // defaults to "sub"
+	RolesClaim  string `yaml:"roles_claim"`   // defaults to "groups"
+}
+
+// TokensConfig groups token-format and framework-integration options.
+type TokensConfig struct {
+	Format       TokenFormatConfig  `yaml:"format"`
+	HasuraClaims HasuraClaimsConfig `yaml:"hasura_claims"`
+	ApolloClaims ApolloClaimsConfig `yaml:"apollo_claims"`
+}
+
+// HeaderMappingConfig declares one response header injected on /userinfo when
+// header_propagation is enabled and header_mappings is non-empty.
+type HeaderMappingConfig struct {
+	Name  string `yaml:"name"`  // HTTP header name, e.g. "X-User-Email"
+	Claim string `yaml:"claim"` // userinfo claim key, e.g. "email"
+	Join  string `yaml:"join"`  // separator for array claims; defaults to ","
 }
 
 type PersistenceConfig struct {
@@ -114,13 +257,25 @@ func Defaults() Config {
 			SessionTTL: 12 * time.Hour,
 		},
 		OIDC: OIDCConfig{
-			IssuerURL:       "http://localhost:8026",
-			AccessTokenTTL:  1 * time.Hour,
-			IDTokenTTL:      1 * time.Hour,
-			RefreshTokenTTL: 30 * 24 * time.Hour,
+			IssuerURL:          "http://localhost:8026",
+			AccessTokenTTL:     1 * time.Hour,
+			IDTokenTTL:         1 * time.Hour,
+			RefreshTokenTTL:    30 * 24 * time.Hour,
+			KeyRotationOverlap: 24 * time.Hour,
 		},
 		SAML: SAMLConfig{
 			EntityID: "http://localhost:8026",
+		},
+		OPA: OPAConfig{
+			CompileTimeout: OPADefaultCompileTimeout,
+			EvalTimeout:    OPADefaultEvalTimeout,
+			MaxPolicyBytes: OPADefaultMaxPolicyBytes,
+			MaxDataBytes:   OPADefaultMaxDataBytes,
+			MaxBatchChecks: OPADefaultMaxBatchChecks,
+			DecisionLog: OPADecisionLogConfig{
+				Enabled:     true,
+				Destination: "stdout",
+			},
 		},
 	}
 }
@@ -158,19 +313,25 @@ type yamlConfig struct {
 	Persistence  yamlPersistence      `yaml:"persistence"`
 	Cleanup      yamlCleanupDurations `yaml:"cleanup"`
 	OIDC         yamlOIDC             `yaml:"oidc"`
+	WebAuthn     WebAuthnConfig       `yaml:"webauthn"`
 	SeedUsers    []SeedUser           `yaml:"seed_users"`
 	Tenancy        string               `yaml:"tenancy"`
 	Tenants        []TenantConfig       `yaml:"tenants"`
 	Provider       string               `yaml:"provider"`
 	SCIMClientMode bool                 `yaml:"scim_client_mode"`
 	SCIMTargetURL  string               `yaml:"scim_target_url"`
+	Tokens         TokensConfig         `yaml:"tokens"`
+	HeaderMappings []HeaderMappingConfig `yaml:"header_mappings"`
+	OPA            OPAConfig            `yaml:"opa"`
 }
 
 type yamlOIDC struct {
-	IssuerURL       string `yaml:"issuer_url"`
-	AccessTokenTTL  string `yaml:"access_token_ttl"`
-	IDTokenTTL      string `yaml:"id_token_ttl"`
-	RefreshTokenTTL string `yaml:"refresh_token_ttl"`
+	IssuerURL           string `yaml:"issuer_url"`
+	AccessTokenTTL      string `yaml:"access_token_ttl"`
+	IDTokenTTL          string `yaml:"id_token_ttl"`
+	RefreshTokenTTL     string `yaml:"refresh_token_ttl"`
+	KeyRotationInterval string `yaml:"key_rotation_interval"`
+	KeyRotationOverlap  string `yaml:"key_rotation_overlap"`
 }
 
 type yamlPersistence struct {
@@ -258,6 +419,26 @@ func mergeYAML(cfg *Config, from yamlConfig) error {
 		}
 		cfg.OIDC.RefreshTokenTTL = d
 	}
+	if from.OIDC.KeyRotationInterval != "" {
+		d, err := time.ParseDuration(from.OIDC.KeyRotationInterval)
+		if err != nil || d < 0 {
+			return fmt.Errorf("yaml oidc.key_rotation_interval: must be a valid non-negative duration")
+		}
+		cfg.OIDC.KeyRotationInterval = d
+	}
+	if from.OIDC.KeyRotationOverlap != "" {
+		d, err := time.ParseDuration(from.OIDC.KeyRotationOverlap)
+		if err != nil || d < 0 {
+			return fmt.Errorf("yaml oidc.key_rotation_overlap: must be a valid non-negative duration")
+		}
+		cfg.OIDC.KeyRotationOverlap = d
+	}
+	if from.WebAuthn.RPID != "" {
+		cfg.WebAuthn.RPID = from.WebAuthn.RPID
+	}
+	if from.WebAuthn.Origin != "" {
+		cfg.WebAuthn.Origin = from.WebAuthn.Origin
+	}
 	if len(from.SeedUsers) > 0 {
 		cfg.SeedUsers = append(cfg.SeedUsers, from.SeedUsers...)
 	}
@@ -275,6 +456,45 @@ func mergeYAML(cfg *Config, from yamlConfig) error {
 	}
 	if from.SCIMTargetURL != "" {
 		cfg.SCIMTargetURL = from.SCIMTargetURL
+	}
+	if from.Tokens.Format.IncludeJTI {
+		cfg.Tokens.Format.IncludeJTI = true
+	}
+	if from.Tokens.Format.AudAsArray {
+		cfg.Tokens.Format.AudAsArray = true
+	}
+	if from.Tokens.Format.IncludeScope {
+		cfg.Tokens.Format.IncludeScope = true
+	}
+	if from.Tokens.HasuraClaims.Enabled {
+		cfg.Tokens.HasuraClaims = from.Tokens.HasuraClaims
+	}
+	if from.Tokens.ApolloClaims.Enabled {
+		cfg.Tokens.ApolloClaims = from.Tokens.ApolloClaims
+	}
+	if len(from.HeaderMappings) > 0 {
+		cfg.HeaderMappings = from.HeaderMappings
+	}
+	if from.OPA.CompileTimeout > 0 {
+		cfg.OPA.CompileTimeout = from.OPA.CompileTimeout
+	}
+	if from.OPA.EvalTimeout > 0 {
+		cfg.OPA.EvalTimeout = from.OPA.EvalTimeout
+	}
+	if from.OPA.MaxPolicyBytes > 0 {
+		cfg.OPA.MaxPolicyBytes = from.OPA.MaxPolicyBytes
+	}
+	if from.OPA.MaxDataBytes > 0 {
+		cfg.OPA.MaxDataBytes = from.OPA.MaxDataBytes
+	}
+	if from.OPA.MaxBatchChecks > 0 {
+		cfg.OPA.MaxBatchChecks = from.OPA.MaxBatchChecks
+	}
+	if from.OPA.MaxConcurrent > 0 {
+		cfg.OPA.MaxConcurrent = from.OPA.MaxConcurrent
+	}
+	if from.OPA.DecisionLog.Destination != "" || from.OPA.DecisionLog.RetentionDays > 0 || len(from.OPA.DecisionLog.RedactFields) > 0 || from.OPA.DecisionLog.ScrubPolicyCredentials {
+		cfg.OPA.DecisionLog = from.OPA.DecisionLog
 	}
 	return nil
 }
@@ -323,16 +543,50 @@ func applyEnv(cfg *Config) error {
 	if v := strings.TrimSpace(os.Getenv("FURNACE_OIDC_ISSUER_URL")); v != "" {
 		cfg.OIDC.IssuerURL = v
 	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_KEY_ROTATION_INTERVAL")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return fmt.Errorf("FURNACE_KEY_ROTATION_INTERVAL: must be a valid non-negative duration (e.g. 24h)")
+		}
+		cfg.OIDC.KeyRotationInterval = d
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_KEY_ROTATION_OVERLAP")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return fmt.Errorf("FURNACE_KEY_ROTATION_OVERLAP: must be a valid non-negative duration (e.g. 24h)")
+		}
+		cfg.OIDC.KeyRotationOverlap = d
+	}
 	if v := strings.TrimSpace(os.Getenv("FURNACE_API_KEY")); v != "" {
 		cfg.APIKey = v
 	}
 	if v := strings.TrimSpace(os.Getenv("FURNACE_SCIM_KEY")); v != "" {
 		cfg.SCIMKey = v
 	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_AUTH_EVENT_LOG")); v != "" {
+		cfg.AuthEventLog = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_SESSION_HASH_KEY")); v != "" {
+		decoded, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			return fmt.Errorf("FURNACE_SESSION_HASH_KEY: not valid base64: %w", err)
+		}
+		if len(decoded) < 16 {
+			return fmt.Errorf("FURNACE_SESSION_HASH_KEY: too short (%d bytes); minimum 16, recommended 32", len(decoded))
+		}
+		cfg.SessionHashKey = decoded
+	}
 	if v := strings.TrimSpace(os.Getenv("FURNACE_CORS_ORIGINS")); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {
 				cfg.CORSOrigins = append(cfg.CORSOrigins, o)
+			}
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_TRUSTED_PROXY_CIDRS")); v != "" {
+		for _, c := range strings.Split(v, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, c)
 			}
 		}
 	}
@@ -348,6 +602,12 @@ func applyEnv(cfg *Config) error {
 	}
 	if v := strings.TrimSpace(os.Getenv("FURNACE_SAML_CERT_DIR")); v != "" {
 		cfg.SAML.CertDir = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_WEBAUTHN_RP_ID")); v != "" {
+		cfg.WebAuthn.RPID = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_WEBAUTHN_ORIGIN")); v != "" {
+		cfg.WebAuthn.Origin = v
 	}
 	if v := strings.TrimSpace(os.Getenv("FURNACE_HEADER_PROPAGATION")); v != "" {
 		b, err := ParseBool(v)
@@ -374,6 +634,27 @@ func applyEnv(cfg *Config) error {
 			return fmt.Errorf("FURNACE_SEED_USERS: %w", err)
 		}
 		cfg.SeedUsers = append(cfg.SeedUsers, users...)
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_OPA_DECISION_LOG_REDACT_FIELDS")); v != "" {
+		for _, f := range strings.Split(v, ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				cfg.OPA.DecisionLog.RedactFields = append(cfg.OPA.DecisionLog.RedactFields, f)
+			}
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_OPA_DECISION_LOG_SCRUB_CREDENTIALS")); v != "" {
+		b, err := ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("FURNACE_OPA_DECISION_LOG_SCRUB_CREDENTIALS: %w", err)
+		}
+		cfg.OPA.DecisionLog.ScrubPolicyCredentials = b
+	}
+	if v := strings.TrimSpace(os.Getenv("FURNACE_OPA_DECISION_LOG_RETENTION_DAYS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("FURNACE_OPA_DECISION_LOG_RETENTION_DAYS: must be a non-negative integer")
+		}
+		cfg.OPA.DecisionLog.RetentionDays = n
 	}
 
 	return nil
@@ -430,6 +711,12 @@ func validate(cfg Config) error {
 	}
 	if cfg.SCIMClientMode && strings.TrimSpace(cfg.SCIMTargetURL) == "" {
 		return errors.New("scim_target_url (FURNACE_SCIM_TARGET) is required when scim_client_mode is enabled")
+	}
+	if len(cfg.SessionHashKey) < 16 {
+		return errors.New("session_hash_key (FURNACE_SESSION_HASH_KEY, base64, 32+ bytes) is required")
+	}
+	if cfg.Tenancy != TenancyMulti && strings.TrimSpace(cfg.APIKey) == "" {
+		return errors.New("api_key (FURNACE_API_KEY) is required in single-tenant mode")
 	}
 	if cfg.Tenancy == TenancyMulti {
 		if len(cfg.Tenants) == 0 {

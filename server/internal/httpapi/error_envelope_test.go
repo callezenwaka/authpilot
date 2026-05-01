@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"furnace/server/internal/authevents"
 )
 
 func assertErrorEnvelope(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string) map[string]any {
@@ -74,7 +76,7 @@ func TestErrorEnvelope_DocsURL_OnRateLimit(t *testing.T) {
 	rl := NewRateLimiter(1, 0) // window=0 means immediate refill — exhaust manually
 	// Use a tiny limiter and exhaust it.
 	rl2 := NewRateLimiter(1, 60_000_000_000) // 1 req / minute
-	handler := rateLimitMiddleware(rl2)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := rateLimitMiddleware(rl2, nil, authevents.Noop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	_ = rl

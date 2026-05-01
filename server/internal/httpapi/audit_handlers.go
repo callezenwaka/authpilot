@@ -34,6 +34,28 @@ func auditListHandler(as store.AuditStore) http.HandlerFunc {
 	}
 }
 
+// auditVerifyHandler walks the tamper-evident hash chain and reports whether
+// every stored event hashes correctly to the next. Returns 200 when intact,
+// 409 when a mismatch is detected.
+func auditVerifyHandler(as store.AuditStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if as == nil {
+			writeAPIError(w, r, http.StatusNotImplemented, "NOT_IMPLEMENTED", "audit store not configured", false)
+			return
+		}
+		result, err := as.Verify()
+		if err != nil {
+			writeAPIError(w, r, http.StatusInternalServerError, "VERIFY_FAILED", err.Error(), false)
+			return
+		}
+		status := http.StatusOK
+		if !result.OK {
+			status = http.StatusConflict
+		}
+		writeJSON(w, status, result)
+	}
+}
+
 func auditExportHandler(as store.AuditStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if as == nil {

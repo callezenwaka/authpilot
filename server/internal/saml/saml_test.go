@@ -238,6 +238,7 @@ func newTestDeps(t *testing.T) RouterDeps {
 		CertMgr:    cm,
 		EntityID:   "http://localhost:8026",
 		SSOURL:     "http://localhost:8026/saml/sso",
+		SLOURL:     "http://localhost:8026/saml/slo",
 		LoginURL:   "http://localhost:8025/login",
 		SessionTTL: 1 * time.Hour,
 	}

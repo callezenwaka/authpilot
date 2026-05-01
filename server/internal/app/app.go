@@ -2,19 +2,19 @@ package app
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
-	"os"
 	"time"
 
+	"furnace/server/internal/authevents"
 	"furnace/server/internal/config"
 	"furnace/server/internal/domain"
 	"furnace/server/internal/httpapi"
 	oidcengine "furnace/server/internal/oidc"
+	opaengine "furnace/server/internal/opa"
 	"furnace/server/internal/personality"
 	samlengine "furnace/server/internal/saml"
 	"furnace/server/internal/scim"
@@ -40,6 +40,9 @@ type App struct {
 	flows    store.FlowStore
 	sessions store.SessionStore
 
+	km              *oidcengine.KeyManager
+	rotationInterval time.Duration
+
 	httpServer     *http.Server
 	protocolServer *http.Server
 	closers        []func() error
@@ -53,7 +56,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	var flows store.FlowStore
 	var sessions store.SessionStore
+	var policies store.PolicyStore
+	var apiKeys store.APIKeyStore
 	var readiness func() error
+	var auditStore store.AuditStore = memory.NewAuditStore(auditCap)
 
 	if cfg.Persistence.Enabled {
 		sq, err := sqliteStore.New(cfg.Persistence.SQLitePath)
@@ -64,6 +70,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		groups = sq.Groups()
 		flows = sq.Flows()
 		sessions = sq.Sessions()
+		policies = sq.Policies()
+		apiKeys = sq.APIKeys()
+		auditStore = sq.Audit()
 		closers = append(closers, sq.Close)
 		readiness = sq.Ping
 	} else {
@@ -72,30 +81,19 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		flows = memory.NewFlowStore()
 		sessions = memory.NewSessionStore()
 	}
-	auditStore := memory.NewAuditStore(auditCap)
 	scimEventStore := memory.NewSCIMEventStore(auditCap)
 
 	if err := seedUsers(users, cfg.SeedUsers); err != nil {
 		return nil, fmt.Errorf("seed users: %w", err)
 	}
 
-	// Admin API is always protected — auto-generate a key if none is configured.
-	if cfg.APIKey == "" {
-		key, err := generateAdminKey()
-		if err != nil {
-			return nil, fmt.Errorf("generate admin api key: %w", err)
-		}
-		cfg.APIKey = key
-		fmt.Fprintf(os.Stderr, "\n[furnace] Admin API Key: %s\n[furnace] Set FURNACE_API_KEY env var to persist this key across restarts.\n\n", key)
-	}
-
-	if cfg.APIKey != "" && len(cfg.APIKey) < 16 {
+	if len(cfg.APIKey) < 16 && cfg.Tenancy != "multi" {
 		logger.Warn("api key is shorter than 16 characters; use a stronger key in production",
 			"length", len(cfg.APIKey))
 	}
 
 	httpBaseURL := "http://localhost" + cfg.HTTPAddr
-	km, err := oidcengine.NewKeyManager()
+	km, err := oidcengine.NewKeyManagerWithOverlap(cfg.OIDC.KeyRotationOverlap)
 	if err != nil {
 		return nil, fmt.Errorf("initialize oidc key manager: %w", err)
 	}
@@ -103,6 +101,15 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		AccessTokenTTL:  cfg.OIDC.AccessTokenTTL,
 		IDTokenTTL:      cfg.OIDC.IDTokenTTL,
 		RefreshTokenTTL: cfg.OIDC.RefreshTokenTTL,
+		IncludeJTI:      cfg.Tokens.Format.IncludeJTI,
+		AudAsArray:      cfg.Tokens.Format.AudAsArray,
+		IncludeScope:    cfg.Tokens.Format.IncludeScope,
+		HasuraClaims: oidcengine.HasuraClaimsConfig{
+			Enabled:      cfg.Tokens.HasuraClaims.Enabled,
+			Namespace:    cfg.Tokens.HasuraClaims.Namespace,
+			DefaultRole:  cfg.Tokens.HasuraClaims.DefaultRole,
+			AllowedRoles: cfg.Tokens.HasuraClaims.AllowedRoles,
+		},
 	}
 	issuer := oidcengine.NewIssuer(km, tokenCfg, cfg.OIDC.IssuerURL)
 	if cfg.Provider != "" {
@@ -130,26 +137,53 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	protocolBase := "http://localhost" + cfg.ProtocolAddr
 
+	trustedProxyCIDRs := make([]*net.IPNet, 0, len(cfg.TrustedProxyCIDRs))
+	for _, raw := range cfg.TrustedProxyCIDRs {
+		_, n, err := net.ParseCIDR(raw)
+		if err != nil {
+			return nil, fmt.Errorf("FURNACE_TRUSTED_PROXY_CIDRS: invalid CIDR %q: %w", raw, err)
+		}
+		trustedProxyCIDRs = append(trustedProxyCIDRs, n)
+	}
+
+	authSink, authSinkCloser, err := authevents.NewSink(cfg.AuthEventLog)
+	if err != nil {
+		return nil, fmt.Errorf("auth event sink: %w", err)
+	}
+	closers = append(closers, authSinkCloser.Close)
+
+	opaEngine, err := opaengine.NewEngine(cfg.OPA)
+	if err != nil {
+		return nil, fmt.Errorf("initialize opa engine: %w", err)
+	}
+
 	router := httpapi.NewRouter(httpapi.Dependencies{
-		Users:         users,
-		Groups:        groups,
-		Flows:         flows,
-		Sessions:      sessions,
-		Audit:         auditStore,
-		APIKey:        cfg.APIKey,
-		SCIMKey:       cfg.SCIMKey,
-		BaseURL:       httpBaseURL,
-		ProtocolURL:   protocolBase,
-		RateLimit:     cfg.RateLimit,
-		SCIMRouter:    scimRouter,
-		TokenMinter:   &issuerMinter{issuer: issuer},
-		ConfigPatcher: cp,
-		TenantStores:  dispatcher,
-		TenantEntries: tenantEntries,
-		SCIMClient:    scimCl,
-		SCIMEvents:    scimEventStore,
-		AdminFS:       web.AdminFS,
-		Readiness:     readiness,
+		Users:             users,
+		Groups:            groups,
+		Flows:             flows,
+		Sessions:          sessions,
+		Audit:             auditStore,
+		APIKey:            cfg.APIKey,
+		SCIMKey:           cfg.SCIMKey,
+		BaseURL:           httpBaseURL,
+		ProtocolURL:       protocolBase,
+		RateLimit:         cfg.RateLimit,
+		TrustedProxyCIDRs: trustedProxyCIDRs,
+		AuthEventSink:     authSink,
+		WebAuthnRPID:      cfg.WebAuthn.RPID,
+		WebAuthnOrigin:    cfg.WebAuthn.Origin,
+		SCIMRouter:        scimRouter,
+		TokenMinter:       &issuerMinter{issuer: issuer},
+		ConfigPatcher:     cp,
+		TenantStores:      dispatcher,
+		TenantEntries:     tenantEntries,
+		SCIMClient:        scimCl,
+		SCIMEvents:        scimEventStore,
+		AdminFS:           web.AdminFS,
+		Readiness:         readiness,
+		OPAEngine:         opaEngine,
+		OPAPolicies:       policies,
+		APIKeyStore:       apiKeys,
 	})
 
 	httpServer := &http.Server{
@@ -159,6 +193,11 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	loginURL := "http://localhost" + cfg.HTTPAddr + "/login"
+	headerMappings := make([]oidcengine.HeaderMapping, len(cfg.HeaderMappings))
+	for idx, m := range cfg.HeaderMappings {
+		headerMappings[idx] = oidcengine.HeaderMapping{Name: m.Name, Claim: m.Claim, Join: m.Join}
+	}
+
 	oidcRouter := oidcengine.NewRouter(oidcengine.RouterDeps{
 		Flows:             flows,
 		Users:             users,
@@ -168,6 +207,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		IssuerURL:         cfg.OIDC.IssuerURL,
 		LoginURL:          loginURL,
 		HeaderPropagation: cfg.HeaderPropagation,
+		HeaderMappings:    headerMappings,
+		SessionHashKey:    cfg.SessionHashKey,
 	})
 
 	samlCertMgr, err := samlengine.NewCertManagerFromPath(cfg.SAML.CertDir)
@@ -175,9 +216,6 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("initialize saml cert manager: %w", err)
 	}
 	samlEntityID := cfg.SAML.EntityID
-	if samlEntityID == "" {
-		samlEntityID = protocolBase
-	}
 	samlRouter := samlengine.NewRouter(samlengine.RouterDeps{
 		Flows:      flows,
 		Users:      users,
@@ -214,20 +252,30 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	return &App{
-		cfg:            cfg,
-		logger:         logger,
-		users:          users,
-		groups:         groups,
-		flows:          flows,
-		sessions:       sessions,
-		httpServer:     httpServer,
-		protocolServer: protocolServer,
-		closers:        closers,
-		cleanupDone:    make(chan struct{}),
+		cfg:              cfg,
+		logger:           logger,
+		users:            users,
+		groups:           groups,
+		flows:            flows,
+		sessions:         sessions,
+		km:               km,
+		rotationInterval: cfg.OIDC.KeyRotationInterval,
+		httpServer:       httpServer,
+		protocolServer:   protocolServer,
+		closers:          closers,
+		cleanupDone:      make(chan struct{}),
 	}, nil
 }
 
 func (a *App) Start(ctx context.Context) error {
+	a.km.StartRotation(ctx, a.rotationInterval, func(err error) {
+		if err != nil {
+			a.logger.Warn("oidc signing key rotation failed", "error", err)
+		} else {
+			a.logger.Info("oidc signing key rotated")
+		}
+	})
+
 	a.logger.Info("furnace starting",
 		"http_addr", a.cfg.HTTPAddr,
 		"protocol_addr", a.cfg.ProtocolAddr,
@@ -456,14 +504,6 @@ func (p *issuerConfigPatcher) SetTokenTTLs(ttls httpapi.TokenTTLs) error {
 	}
 	p.issuer.SetTokenConfig(cfg)
 	return nil
-}
-
-func generateAdminKey() (string, error) {
-	b := make([]byte, 20)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return "furn_" + hex.EncodeToString(b), nil
 }
 
 // issuerMinter adapts oidcengine.Issuer to the httpapi.TokenMinter interface.
