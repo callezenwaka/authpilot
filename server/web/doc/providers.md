@@ -387,7 +387,7 @@ Create a test user via the Admin API. You will need your API key from **Admin UI
 </div>
 
 <div class="tab-panel" data-panel="okta">
-<p>Open <strong>Admin UI → Login Simulator</strong>, select Alice, and click <strong>Continue</strong>. The token issued will contain <code>login</code> and <code>groups</code> as a real Okta token would. Use <strong>Notify Hub</strong> to approve any MFA challenges if the user has MFA configured.</p>
+<p>Open <strong>Admin UI → Login Simulator</strong>, select Alice, and click <strong>Continue</strong>. The token issued will contain <code>login</code> and <code>groups</code> as a real Okta token would. Use the bell icon (top-right in the Admin UI) to approve any MFA challenges if the user has MFA configured.</p>
 </div>
 
 <div class="tab-panel" data-panel="google-workspace">
@@ -537,7 +537,7 @@ After the login flow, inspect the token against Furnace's introspect endpoint or
 </div>
 
 <div class="tab-panel" data-panel="okta">
-<p>Read <code>login</code> (not <code>email</code>) as the primary identifier. Verify <code>groups</code> is handled as an array. Confirm MFA flows work end-to-end using the Login Simulator and Notify Hub.</p>
+<p>Read <code>login</code> (not <code>email</code>) as the primary identifier. Verify <code>groups</code> is handled as an array. Confirm MFA flows work end-to-end using the Login Simulator and the bell icon (Notification Hub) in the Admin UI.</p>
 </div>
 
 <div class="tab-panel" data-panel="google-workspace">
