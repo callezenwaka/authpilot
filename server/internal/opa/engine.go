@@ -58,7 +58,7 @@ func NewEngine(cfg config.OPAConfig) (*Engine, error) {
 		return slices.Contains(disabledBuiltins, b.Name)
 	})
 
-	dl, err := newDecisionLog(cfg.DecisionLog)
+	dl, err := newDecisionLog(cfg.DecisionLog, cfg.TenantBudgets)
 	if err != nil {
 		return nil, fmt.Errorf("opa: init decision log: %w", err)
 	}
@@ -265,6 +265,7 @@ func (e *Engine) LogDecision(entry DecisionEntry) {
 type DecisionEntry struct {
 	Timestamp     time.Time      `json:"timestamp"`
 	RequestID     string         `json:"request_id,omitempty"`
+	TenantID      string         `json:"tenant_id,omitempty"`
 	UserID        string         `json:"user_id,omitempty"`
 	Action        string         `json:"action,omitempty"`
 	Resource      string         `json:"resource,omitempty"`
@@ -275,6 +276,10 @@ type DecisionEntry struct {
 	EvalMS        int64          `json:"eval_ms"`
 	Input         map[string]any `json:"input,omitempty"`
 	Policy        string         `json:"policy,omitempty"`
+	// TenantOverrides carries per-tenant decision log settings resolved from
+	// OPATenantBudget.DecisionLog. It is applied at write time and is never
+	// serialised into the log entry (json:"-").
+	TenantOverrides *config.OPATenantDecisionLog `json:"-"`
 }
 
 // ---- typed errors ----
@@ -308,18 +313,19 @@ var credentialPatterns = []*regexp.Regexp{
 }
 
 type decisionLog struct {
-	cfg  config.OPADecisionLogConfig
-	mu   sync.Mutex
-	w    interface{ Write([]byte) (int, error) }
-	enc  *json.Encoder
-	file *os.File // non-nil when writing to a file path
+	cfg           config.OPADecisionLogConfig
+	tenantBudgets map[string]config.OPATenantBudget
+	mu            sync.Mutex
+	w             interface{ Write([]byte) (int, error) }
+	enc           *json.Encoder
+	file          *os.File // non-nil when writing to a file path
 }
 
-func newDecisionLog(cfg config.OPADecisionLogConfig) (*decisionLog, error) {
+func newDecisionLog(cfg config.OPADecisionLogConfig, tenantBudgets map[string]config.OPATenantBudget) (*decisionLog, error) {
 	if !cfg.Enabled {
-		return &decisionLog{cfg: cfg}, nil
+		return &decisionLog{cfg: cfg, tenantBudgets: tenantBudgets}, nil
 	}
-	dl := &decisionLog{cfg: cfg}
+	dl := &decisionLog{cfg: cfg, tenantBudgets: tenantBudgets}
 	switch cfg.Destination {
 	case "", "stdout":
 		dl.w = writerFunc(func(p []byte) (int, error) {
@@ -332,12 +338,10 @@ func newDecisionLog(cfg config.OPADecisionLogConfig) (*decisionLog, error) {
 			return len(p), nil
 		})
 	default:
-		// File path — apply retention pruning on open, then append.
-		if cfg.RetentionDays > 0 {
-			if err := pruneDecisionLog(cfg.Destination, cfg.RetentionDays); err != nil {
-				// Non-fatal: log to stderr and continue.
-				fmt.Fprintf(os.Stderr, "opa: decision log retention prune: %v\n", err)
-			}
+		// File path — apply retention pruning on open (global + per-tenant), then append.
+		if err := pruneDecisionLog(cfg.Destination, cfg.RetentionDays, tenantBudgets); err != nil {
+			// Non-fatal: log to stderr and continue.
+			fmt.Fprintf(os.Stderr, "opa: decision log retention prune: %v\n", err)
 		}
 		f, err := os.OpenFile(cfg.Destination, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
@@ -364,17 +368,33 @@ func (d *decisionLog) write(entry DecisionEntry) {
 	if !d.cfg.Enabled || d.enc == nil {
 		return
 	}
+
+	// Build effective redact list and scrub flag, merging per-tenant additions.
+	redactFields := d.cfg.RedactFields
+	doScrub := d.cfg.ScrubPolicyCredentials
+	if entry.TenantOverrides != nil {
+		if len(entry.TenantOverrides.AdditionalRedactFields) > 0 {
+			merged := make([]string, 0, len(redactFields)+len(entry.TenantOverrides.AdditionalRedactFields))
+			merged = append(merged, redactFields...)
+			merged = append(merged, entry.TenantOverrides.AdditionalRedactFields...)
+			redactFields = merged
+		}
+		if entry.TenantOverrides.ScrubPolicyCredentials {
+			doScrub = true
+		}
+	}
+
 	if !d.cfg.IncludeInput {
 		entry.Input = nil
-	} else if len(d.cfg.RedactFields) > 0 && entry.Input != nil {
+	} else if len(redactFields) > 0 && entry.Input != nil {
 		entry.Input = deepCloneMap(entry.Input)
-		for _, path := range d.cfg.RedactFields {
+		for _, path := range redactFields {
 			redactPath(entry.Input, path)
 		}
 	}
 	if !d.cfg.IncludePolicy {
 		entry.Policy = ""
-	} else if d.cfg.ScrubPolicyCredentials && entry.Policy != "" {
+	} else if doScrub && entry.Policy != "" {
 		entry.Policy = scrubCredentials(entry.Policy)
 	}
 	d.mu.Lock()
@@ -427,9 +447,16 @@ func scrubCredentials(policy string) string {
 }
 
 // pruneDecisionLog rewrites path in place, keeping only NDJSON lines whose
-// "timestamp" field is within retentionDays of now. Lines that cannot be
-// parsed are kept (conservative). No-op when the file does not exist.
-func pruneDecisionLog(path string, retentionDays int) error {
+// "timestamp" field is within the effective retention window. The effective
+// retention for each line is min(globalRetentionDays, per-tenant override) when
+// a tenant-specific RetentionDays is configured and tighter; otherwise the
+// global value is used. Lines that cannot be parsed are kept (conservative).
+// No-op when the file does not exist or no retention is configured anywhere.
+func pruneDecisionLog(path string, globalRetentionDays int, tenantBudgets map[string]config.OPATenantBudget) error {
+	if globalRetentionDays <= 0 && !hasAnyTenantRetention(tenantBudgets) {
+		return nil
+	}
+
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -438,7 +465,7 @@ func pruneDecisionLog(path string, retentionDays int) error {
 		return err
 	}
 
-	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+	now := time.Now().UTC()
 	var kept [][]byte
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -449,12 +476,24 @@ func pruneDecisionLog(path string, retentionDays int) error {
 		}
 		var rec struct {
 			Timestamp time.Time `json:"timestamp"`
+			TenantID  string    `json:"tenant_id"`
 		}
 		if err := json.Unmarshal(line, &rec); err != nil || rec.Timestamp.IsZero() {
 			kept = append(kept, append([]byte(nil), line...)) // keep unparseable lines
 			continue
 		}
-		if rec.Timestamp.UTC().After(cutoff) {
+
+		// Determine effective retention: tighter of global and per-tenant.
+		effective := globalRetentionDays
+		if rec.TenantID != "" && tenantBudgets != nil {
+			if tb, ok := tenantBudgets[rec.TenantID]; ok && tb.DecisionLog != nil && tb.DecisionLog.RetentionDays > 0 {
+				if effective == 0 || tb.DecisionLog.RetentionDays < effective {
+					effective = tb.DecisionLog.RetentionDays
+				}
+			}
+		}
+
+		if effective <= 0 || rec.Timestamp.UTC().After(now.AddDate(0, 0, -effective)) {
 			kept = append(kept, append([]byte(nil), line...))
 		}
 	}
@@ -478,6 +517,18 @@ func pruneDecisionLog(path string, retentionDays int) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// hasAnyTenantRetention reports whether any tenant in budgets has a per-tenant
+// RetentionDays configured so pruneDecisionLog can skip scanning when nothing
+// would be pruned.
+func hasAnyTenantRetention(budgets map[string]config.OPATenantBudget) bool {
+	for _, b := range budgets {
+		if b.DecisionLog != nil && b.DecisionLog.RetentionDays > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 type writerFunc func([]byte) (int, error)

@@ -187,17 +187,19 @@ func evaluateHandler(dep RouterDeps) http.HandlerFunc {
 		resp := buildEvaluateResponse(result, query, input, req.Trace)
 		resp.PolicyVersion = policyVersion
 		dep.Engine.LogDecision(DecisionEntry{
-			Timestamp:     resp.EvaluationTimestamp,
-			UserID:        req.UserID,
-			Action:        req.Action,
-			Resource:      req.Resource,
-			Allow:         resp.Allow,
-			Decision:      resp.Decision,
-			PolicyVersion: policyVersion,
-			ContentHash:   policyContentHash,
-			EvalMS:        result.EvalMS,
-			Input:         input,
-			Policy:        req.Policy,
+			Timestamp:       resp.EvaluationTimestamp,
+			TenantID:        tenant.FromContext(r.Context()),
+			UserID:          req.UserID,
+			Action:          req.Action,
+			Resource:        req.Resource,
+			Allow:           resp.Allow,
+			Decision:        resp.Decision,
+			PolicyVersion:   policyVersion,
+			ContentHash:     policyContentHash,
+			EvalMS:          result.EvalMS,
+			Input:           input,
+			Policy:          req.Policy,
+			TenantOverrides: budget.DecisionLog,
 		})
 		writeJSON(w, http.StatusOK, resp)
 	}

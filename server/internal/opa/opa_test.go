@@ -884,7 +884,6 @@ func isError[T error](err error, target *T) bool {
 	}
 	s := err.Error()
 	return strings.Contains(s, "") && func() bool {
-		type iface interface{ Error() string }
 		_, ok := err.(T)
 		return ok
 	}()

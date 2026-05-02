@@ -15,7 +15,7 @@ import (
 
 func newTestDecisionLog(t *testing.T, cfg config.OPADecisionLogConfig) *decisionLog {
 	t.Helper()
-	dl, err := newDecisionLog(cfg)
+	dl, err := newDecisionLog(cfg, nil)
 	if err != nil {
 		t.Fatalf("newDecisionLog: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestPruneDecisionLog_RemovesOldEntries(t *testing.T) {
 	_ = enc.Encode(recent)
 	f.Close()
 
-	if err := pruneDecisionLog(path, 3); err != nil {
+	if err := pruneDecisionLog(path, 3, nil); err != nil {
 		t.Fatalf("pruneDecisionLog: %v", err)
 	}
 
@@ -264,7 +264,7 @@ func TestPruneDecisionLog_RemovesOldEntries(t *testing.T) {
 }
 
 func TestPruneDecisionLog_NonexistentFileIsNoop(t *testing.T) {
-	err := pruneDecisionLog(filepath.Join(t.TempDir(), "missing.ndjson"), 7)
+	err := pruneDecisionLog(filepath.Join(t.TempDir(), "missing.ndjson"), 7, nil)
 	if err != nil {
 		t.Errorf("expected no error for missing file, got: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestPruneDecisionLog_KeepsUnparseable(t *testing.T) {
 	f.WriteString("not-json\n") //nolint:errcheck
 	f.Close()
 
-	if err := pruneDecisionLog(path, 3); err != nil {
+	if err := pruneDecisionLog(path, 3, nil); err != nil {
 		t.Fatalf("pruneDecisionLog: %v", err)
 	}
 

@@ -62,7 +62,7 @@ func newWebAuthn(r *http.Request, s webAuthnSettings) (*webauthn.WebAuthn, error
 		return nil, fmt.Errorf("webauthn origin is not a valid URL")
 	}
 	if !strings.EqualFold(r.Host, u.Host) {
-		return nil, errors.New("Host header does not match configured WebAuthn origin")
+		return nil, errors.New("host header does not match configured WebAuthn origin")
 	}
 	return webauthn.New(&webauthn.Config{
 		RPID:          s.RPID,
