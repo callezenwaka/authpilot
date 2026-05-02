@@ -17,6 +17,8 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"furnace/server/web"
+
 	"furnace/server/internal/audit"
 	"furnace/server/internal/authevents"
 	"furnace/server/internal/domain"
@@ -145,6 +147,7 @@ func NewRouter(dep Dependencies) http.Handler {
 
 	registerAdminRoutes(r, dep.AdminStaticDir, dep.AdminFS, dep.APIKey, dep.SessionHashKey, dep.Admins, dep.AdminCookieKey)
 
+	r.HandleFunc("/favicon.svg", faviconHandler()).Methods(http.MethodGet)
 	r.HandleFunc("/", homeHandler(dep.APIKey)).Methods(http.MethodGet)
 
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
@@ -526,6 +529,19 @@ func serveAdminIndex(indexPath, apiKey, sessionHashKey string) http.HandlerFunc 
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(injectAdminConfig(content, apiKey, sessionHashKey))
+	}
+}
+
+func faviconHandler() http.HandlerFunc {
+	data, err := web.FaviconSVG()
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if err != nil {
+			http.NotFound(w, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(data)
 	}
 }
 

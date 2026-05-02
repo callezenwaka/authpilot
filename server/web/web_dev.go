@@ -28,3 +28,8 @@ func ParseTemplate(name string) (*template.Template, error) {
 func ReadDoc(name string) ([]byte, error) {
 	return os.ReadFile(filepath.Join("server", "web", "doc", name))
 }
+
+// FaviconSVG reads the favicon SVG from disk.
+func FaviconSVG() ([]byte, error) {
+	return os.ReadFile(filepath.Join("server", "web", "static", "favicon.svg"))
+}

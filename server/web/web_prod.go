@@ -19,6 +19,9 @@ var embeddedDoc embed.FS
 //go:embed static/admin
 var embeddedAdmin embed.FS
 
+//go:embed static/favicon.svg
+var embeddedFaviconFS embed.FS
+
 // AdminFS is the embedded admin SPA rooted at static/admin.
 var AdminFS fs.FS = func() fs.FS {
 	sub, _ := fs.Sub(embeddedAdmin, "static/admin")
@@ -65,4 +68,9 @@ func ParseTemplate(name string) (*template.Template, error) {
 // ReadDoc reads the named Markdown file from the embedded doc filesystem.
 func ReadDoc(name string) ([]byte, error) {
 	return embeddedDoc.ReadFile("doc/" + name)
+}
+
+// FaviconSVG returns the embedded favicon SVG bytes.
+func FaviconSVG() ([]byte, error) {
+	return embeddedFaviconFS.ReadFile("static/favicon.svg")
 }

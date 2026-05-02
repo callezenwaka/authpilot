@@ -192,8 +192,8 @@ onUnmounted(() => clearInterval(badgePoll))
 
 .bell-badge {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 1px;
+  right: 1px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -206,6 +206,22 @@ onUnmounted(() => clearInterval(badgePoll))
   background: #dc2626;
   color: #fff;
   line-height: 1;
+  border: 2px solid #fff;
+}
+.bell-badge::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: #dc2626;
+  z-index: -1;
+  opacity: 0;
+  animation: badge-pulse 1.8s ease-out infinite;
+}
+@keyframes badge-pulse {
+  0%   { transform: scale(0.4); opacity: 0.7; }
+  70%  { transform: scale(1.6); opacity: 0; }
+  100% { transform: scale(1.6); opacity: 0; }
 }
 
 .signout-btn {
