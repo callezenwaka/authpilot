@@ -169,6 +169,84 @@ func TestDeleteUser_CallsSCIMClient(t *testing.T) {
 	}
 }
 
+func TestCreateUser_SyncsGroupMemberIDs(t *testing.T) {
+	groups := memory.NewGroupStore()
+	g, _ := groups.Create(domain.Group{
+		ID:          "grp_eng",
+		Name:        "engineering",
+		DisplayName: "Engineering",
+		CreatedAt:   time.Now().UTC(),
+	})
+
+	r := NewRouter(Dependencies{
+		Users:    memory.NewUserStore(),
+		Groups:   groups,
+		Flows:    memory.NewFlowStore(),
+		Sessions: memory.NewSessionStore(),
+		APIKey:   "test-key",
+	})
+
+	body, _ := json.Marshal(map[string]any{
+		"id":     "u1",
+		"email":  "alice@example.com",
+		"groups": []string{g.ID},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	updated, _ := groups.GetByID(g.ID)
+	if len(updated.MemberIDs) != 1 || updated.MemberIDs[0] != "u1" {
+		t.Errorf("group.MemberIDs = %v, want [u1]", updated.MemberIDs)
+	}
+}
+
+func TestUpdateUser_SyncsGroupMemberIDs(t *testing.T) {
+	users := memory.NewUserStore()
+	groups := memory.NewGroupStore()
+
+	// User starts in no groups.
+	_, _ = users.Create(domain.User{ID: "u1", Email: "alice@example.com", Active: true, CreatedAt: time.Now().UTC()})
+	g, _ := groups.Create(domain.Group{
+		ID:          "grp_eng",
+		Name:        "engineering",
+		DisplayName: "Engineering",
+		CreatedAt:   time.Now().UTC(),
+	})
+
+	r := NewRouter(Dependencies{
+		Users:    users,
+		Groups:   groups,
+		Flows:    memory.NewFlowStore(),
+		Sessions: memory.NewSessionStore(),
+		APIKey:   "test-key",
+	})
+
+	// Update user to add them to the group.
+	body, _ := json.Marshal(map[string]any{
+		"email":  "alice@example.com",
+		"groups": []string{g.ID},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/users/u1", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	updated, _ := groups.GetByID(g.ID)
+	if len(updated.MemberIDs) != 1 || updated.MemberIDs[0] != "u1" {
+		t.Errorf("group.MemberIDs = %v, want [u1]", updated.MemberIDs)
+	}
+}
+
 func TestCreateUser_NilSCIMClient_DoesNotPanic(t *testing.T) {
 	r := newSCIMRouter(t, nil, nil)
 	body, _ := json.Marshal(map[string]any{"id": "u1", "email": "a@b.com"})

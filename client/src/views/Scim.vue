@@ -55,10 +55,10 @@
                 </span>
               </td>
               <td>
-                <span v-for="g in (u.groups ?? [])" :key="g.value" class="badge badge-gray" style="margin-right:3px">
-                  {{ g.display || g.value }}
+                <span v-if="(u.groups ?? []).length" class="badge badge-gray">
+                  {{ (u.groups ?? []).length }} {{ (u.groups ?? []).length === 1 ? 'group' : 'groups' }}
                 </span>
-                <span v-if="!(u.groups?.length)" class="badge badge-gray">—</span>
+                <span v-else class="badge badge-gray">—</span>
               </td>
             </tr>
           </tbody>
@@ -87,10 +87,10 @@
               <td><code>{{ g.id }}</code></td>
               <td>{{ g.displayName }}</td>
               <td>
-                <span v-for="m in (g.members ?? [])" :key="m.value" class="badge badge-gray" style="margin-right:3px">
-                  {{ m.display || m.value }}
+                <span v-if="(g.members ?? []).length" class="badge badge-gray">
+                  {{ (g.members ?? []).length }} {{ (g.members ?? []).length === 1 ? 'member' : 'members' }}
                 </span>
-                <span v-if="!(g.members?.length)" class="badge badge-gray">—</span>
+                <span v-else class="badge badge-gray">—</span>
               </td>
             </tr>
           </tbody>

@@ -150,6 +150,49 @@ func TestListUsers_Filter(t *testing.T) {
 	}
 }
 
+func TestListUsers_GroupRefs(t *testing.T) {
+	r := newTestRouter()
+
+	// Create a user via SCIM.
+	urec := do(t, r, http.MethodPost, "/scim/v2/Users", `{"userName":"alice@example.com","displayName":"Alice"}`)
+	if urec.Code != http.StatusCreated {
+		t.Fatalf("create user: status = %d", urec.Code)
+	}
+	var created scimUser
+	_ = json.Unmarshal(urec.Body.Bytes(), &created)
+
+	// Create a group that includes the user.
+	grec := do(t, r, http.MethodPost, "/scim/v2/Groups",
+		`{"displayName":"Engineering","members":[{"value":"`+created.ID+`"}]}`)
+	if grec.Code != http.StatusCreated {
+		t.Fatalf("create group: status = %d", grec.Code)
+	}
+	var createdGroup scimGroup
+	_ = json.Unmarshal(grec.Body.Bytes(), &createdGroup)
+
+	// List users — the user's groups field must reference the group.
+	rec := do(t, r, http.MethodGet, "/scim/v2/Users", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list users: status = %d", rec.Code)
+	}
+	var resp listResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if resp.TotalResults != 1 {
+		t.Fatalf("TotalResults = %d, want 1", resp.TotalResults)
+	}
+	raw, _ := json.Marshal(resp.Resources[0])
+	var u scimUser
+	_ = json.Unmarshal(raw, &u)
+	if len(u.Groups) != 1 {
+		t.Fatalf("user.groups len = %d, want 1", len(u.Groups))
+	}
+	if u.Groups[0].Value != createdGroup.ID {
+		t.Errorf("user.groups[0].value = %q, want %q", u.Groups[0].Value, createdGroup.ID)
+	}
+}
+
 func TestReplaceUser(t *testing.T) {
 	r := newTestRouter()
 	rec := do(t, r, http.MethodPost, "/scim/v2/Users", `{"userName":"alice@example.com","displayName":"Alice"}`)
