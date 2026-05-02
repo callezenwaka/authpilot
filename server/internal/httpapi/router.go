@@ -472,6 +472,7 @@ func registerAdminRoutes(r *mux.Router, adminStaticDir string, adminFS fs.FS, ap
 		fileServer := http.FileServer(http.FS(adminFS))
 		r.PathPrefix("/admin/assets/").Handler(http.StripPrefix("/admin/", fileServer))
 		r.Handle("/admin/vite.svg", http.StripPrefix("/admin/", fileServer))
+		r.Handle("/admin/favicon.svg", http.StripPrefix("/admin/", fileServer))
 		r.Handle("/admin", wrap(http.HandlerFunc(serveAdminIndexFS(adminFS, apiKey, sessionHashKey))))
 		r.PathPrefix("/admin/").Handler(wrap(http.HandlerFunc(serveAdminIndexFS(adminFS, apiKey, sessionHashKey))))
 		return
@@ -486,6 +487,7 @@ func registerAdminRoutes(r *mux.Router, adminStaticDir string, adminFS fs.FS, ap
 
 	r.PathPrefix("/admin/assets/").Handler(adminAssets)
 	r.Handle("/admin/vite.svg", adminAssets)
+	r.Handle("/admin/favicon.svg", adminAssets)
 	r.Handle("/admin", wrap(http.HandlerFunc(serveAdminIndex(adminIndexPath, apiKey, sessionHashKey))))
 	r.PathPrefix("/admin/").Handler(wrap(http.HandlerFunc(serveAdminIndex(adminIndexPath, apiKey, sessionHashKey))))
 }
