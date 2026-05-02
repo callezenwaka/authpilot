@@ -334,6 +334,9 @@ func (a *App) Start(ctx context.Context) error {
 		}
 	}()
 
+	_, httpPort, _ := net.SplitHostPort(a.cfg.HTTPAddr)
+	fmt.Printf("\nFurnace ready\n  Home:     http://localhost:%s\n  Admin:    http://localhost:%s/admin\n  Docs:     http://localhost:%s/doc\n\n", httpPort, httpPort, httpPort)
+
 	select {
 	case <-ctx.Done():
 		a.logger.Info("shutdown signal received")

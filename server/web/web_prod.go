@@ -33,7 +33,7 @@ var (
 
 func initTemplates() {
 	parsed = make(map[string]*template.Template)
-	for _, name := range []string{"home.html", "login.html", "mfa.html", "complete.html"} {
+	for _, name := range []string{"home.html", "login.html", "mfa.html", "complete.html", "doc.html"} {
 		data, err := embeddedTemplates.ReadFile("templates/" + name)
 		if err != nil {
 			parseErr = fmt.Errorf("read embedded template %s: %w", name, err)
