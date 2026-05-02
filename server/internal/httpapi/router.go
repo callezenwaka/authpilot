@@ -179,6 +179,11 @@ func NewRouter(dep Dependencies) http.Handler {
 		users, _, flows, _, _ := dep.resolveStores(r.Context())
 		loginMagicHandler(flows, users)(w, r)
 	}).Methods(http.MethodGet)
+	// Public — the flow ID is the secret; used by the push/magic-link MFA poll.
+	r.HandleFunc("/login/flow/{id}/state", func(w http.ResponseWriter, r *http.Request) {
+		_, _, flows, _, _ := dep.resolveStores(r.Context())
+		flowStateHandler(flows)(w, r)
+	}).Methods(http.MethodGet)
 
 	// OpenAPI spec and Swagger UI are public — no auth required.
 	r.HandleFunc("/api/v1/openapi.json", openAPISpecHandler).Methods(http.MethodGet)
@@ -187,6 +192,27 @@ func NewRouter(dep Dependencies) http.Handler {
 	// Docs — public, no auth required.
 	r.HandleFunc("/doc", docIndexHandler()).Methods(http.MethodGet)
 	r.HandleFunc("/doc/{slug}", docHandler()).Methods(http.MethodGet)
+
+	// WebAuthn flow endpoints are called by the end-user's browser from mfa.html,
+	// not by the admin SPA, so they must be public (flow ID is the credential).
+	// Registered here before the api subrouter so they bypass the API key middleware.
+	wa := webAuthnSettings{RPID: dep.WebAuthnRPID, Origin: dep.WebAuthnOrigin}
+	r.HandleFunc("/api/v1/flows/{id}/webauthn-begin-register", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		webauthnBeginRegisterHandler(flows, users, wa)(w, r)
+	}).Methods(http.MethodGet)
+	r.HandleFunc("/api/v1/flows/{id}/webauthn-finish-register", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		webauthnFinishRegisterHandler(flows, users, wa)(w, r)
+	}).Methods(http.MethodPost)
+	r.HandleFunc("/api/v1/flows/{id}/webauthn-begin", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, _ := dep.resolveStores(r.Context())
+		webauthnBeginHandler(flows, users, wa)(w, r)
+	}).Methods(http.MethodGet)
+	r.HandleFunc("/api/v1/flows/{id}/webauthn-response", func(w http.ResponseWriter, r *http.Request) {
+		users, _, flows, _, as := dep.resolveStores(r.Context())
+		webauthnResponseHandler(flows, users, as, wa, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
+	}).Methods(http.MethodPost)
 
 	api := r.PathPrefix("/api/v1").Subrouter()
 	if dep.TenantStores != nil && len(dep.TenantEntries) > 0 {
@@ -272,23 +298,6 @@ func NewRouter(dep Dependencies) http.Handler {
 	api.HandleFunc("/flows/{id}/deny", func(w http.ResponseWriter, r *http.Request) {
 		_, _, flows, _, as := dep.resolveStores(r.Context())
 		denyFlowHandler(flows, as, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
-	}).Methods(http.MethodPost)
-	wa := webAuthnSettings{RPID: dep.WebAuthnRPID, Origin: dep.WebAuthnOrigin}
-	api.HandleFunc("/flows/{id}/webauthn-begin-register", func(w http.ResponseWriter, r *http.Request) {
-		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		webauthnBeginRegisterHandler(flows, users, wa)(w, r)
-	}).Methods(http.MethodGet)
-	api.HandleFunc("/flows/{id}/webauthn-finish-register", func(w http.ResponseWriter, r *http.Request) {
-		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		webauthnFinishRegisterHandler(flows, users, wa)(w, r)
-	}).Methods(http.MethodPost)
-	api.HandleFunc("/flows/{id}/webauthn-begin", func(w http.ResponseWriter, r *http.Request) {
-		users, _, flows, _, _ := dep.resolveStores(r.Context())
-		webauthnBeginHandler(flows, users, wa)(w, r)
-	}).Methods(http.MethodGet)
-	api.HandleFunc("/flows/{id}/webauthn-response", func(w http.ResponseWriter, r *http.Request) {
-		users, _, flows, _, as := dep.resolveStores(r.Context())
-		webauthnResponseHandler(flows, users, as, wa, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
 	}).Methods(http.MethodPost)
 
 	api.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {

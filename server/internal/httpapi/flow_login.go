@@ -23,6 +23,22 @@ import (
 
 const defaultFlowTTL = 30 * time.Minute
 
+// flowStateHandler returns {"state":"..."} for a flow ID without requiring an
+// API key. The flow ID is a random secret, so it serves as its own credential.
+// Used by the push/magic-link MFA polling loop in mfa.html.
+func flowStateHandler(flows store.FlowStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := mux.Vars(r)["id"]
+		flow, err := flows.GetByID(id)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"state": flow.State})
+	}
+}
+
 func newCSRFToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

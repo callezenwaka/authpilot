@@ -67,7 +67,7 @@
     <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
     <script>
       setInterval(async () => {
-        const res = await fetch('/api/v1/flows/' + flowId);
+        const res = await fetch('/login/flow/' + flowId + '/state');
         if (!res.ok) return;
         const flow = await res.json();
         if (flow.state === 'mfa_approved' || flow.state === 'complete') {
@@ -81,7 +81,7 @@
     <a class="hub-link" href="/admin" target="_blank">→ Open notification hub</a>
     <script>
       setInterval(async () => {
-        const res = await fetch('/api/v1/flows/' + flowId);
+        const res = await fetch('/login/flow/' + flowId + '/state');
         if (!res.ok) return;
         const flow = await res.json();
         if (flow.state === 'mfa_approved' || flow.state === 'complete') {
