@@ -137,6 +137,23 @@ const (
 	OPADefaultMaxBatchChecks = 100
 )
 
+// OPATenantDecisionLog provides per-tenant overrides for the OPA decision log.
+// All settings can only tighten global behaviour — they cannot disable global
+// redaction, restore scrubbed fields, or extend retention beyond the global limit.
+// Configured via YAML only; there is no env-var representation for this nested map.
+type OPATenantDecisionLog struct {
+	// AdditionalRedactFields is merged with the global redact_fields list.
+	// Paths use dot notation, e.g. "user.claims.ssn".
+	AdditionalRedactFields []string `yaml:"additional_redact_fields"`
+	// ScrubPolicyCredentials enables credential scrubbing for this tenant even
+	// when the global setting is false. Has no effect when global is already true.
+	ScrubPolicyCredentials bool `yaml:"scrub_policy_credentials"`
+	// RetentionDays overrides global retention for log entries belonging to this
+	// tenant. When > 0 and tighter than the global value, per-tenant entries are
+	// pruned earlier. 0 means "inherit global".
+	RetentionDays int `yaml:"retention_days"`
+}
+
 // OPATenantBudget defines per-tenant OPA resource limits.
 // All fields are optional (zero = use global default).
 // Per-tenant budgets can only be equal to or tighter than the global limits —
@@ -144,11 +161,12 @@ const (
 // override cannot loosen protection. Configurable via YAML only; there is no
 // env-var representation for this nested map.
 type OPATenantBudget struct {
-	EvalTimeout    time.Duration `yaml:"eval_timeout"`
-	CompileTimeout time.Duration `yaml:"compile_timeout"`
-	MaxPolicyBytes int64         `yaml:"max_policy_bytes"`
-	MaxDataBytes   int64         `yaml:"max_data_bytes"`
-	MaxBatchChecks int           `yaml:"max_batch_checks"`
+	EvalTimeout    time.Duration         `yaml:"eval_timeout"`
+	CompileTimeout time.Duration         `yaml:"compile_timeout"`
+	MaxPolicyBytes int64                 `yaml:"max_policy_bytes"`
+	MaxDataBytes   int64                 `yaml:"max_data_bytes"`
+	MaxBatchChecks int                   `yaml:"max_batch_checks"`
+	DecisionLog    *OPATenantDecisionLog `yaml:"decision_log"`
 }
 
 // OPAConfig holds all OPA integration settings.
@@ -496,6 +514,9 @@ func mergeYAML(cfg *Config, from yamlConfig) error {
 	if from.OPA.DecisionLog.Destination != "" || from.OPA.DecisionLog.RetentionDays > 0 || len(from.OPA.DecisionLog.RedactFields) > 0 || from.OPA.DecisionLog.ScrubPolicyCredentials {
 		cfg.OPA.DecisionLog = from.OPA.DecisionLog
 	}
+	if len(from.OPA.TenantBudgets) > 0 {
+		cfg.OPA.TenantBudgets = from.OPA.TenantBudgets
+	}
 	return nil
 }
 
@@ -711,12 +732,6 @@ func validate(cfg Config) error {
 	}
 	if cfg.SCIMClientMode && strings.TrimSpace(cfg.SCIMTargetURL) == "" {
 		return errors.New("scim_target_url (FURNACE_SCIM_TARGET) is required when scim_client_mode is enabled")
-	}
-	if len(cfg.SessionHashKey) < 16 {
-		return errors.New("session_hash_key (FURNACE_SESSION_HASH_KEY, base64, 32+ bytes) is required")
-	}
-	if cfg.Tenancy != TenancyMulti && strings.TrimSpace(cfg.APIKey) == "" {
-		return errors.New("api_key (FURNACE_API_KEY) is required in single-tenant mode")
 	}
 	if cfg.Tenancy == TenancyMulti {
 		if len(cfg.Tenants) == 0 {

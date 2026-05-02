@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -61,8 +64,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	var readiness func() error
 	var auditStore store.AuditStore = memory.NewAuditStore(auditCap)
 
+	var sq *sqliteStore.Store
 	if cfg.Persistence.Enabled {
-		sq, err := sqliteStore.New(cfg.Persistence.SQLitePath)
+		var err error
+		sq, err = sqliteStore.New(cfg.Persistence.SQLitePath)
 		if err != nil {
 			return nil, fmt.Errorf("initialize sqlite persistence: %w", err)
 		}
@@ -87,7 +92,28 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("seed users: %w", err)
 	}
 
-	if len(cfg.APIKey) < 16 && cfg.Tenancy != "multi" {
+	if len(cfg.SessionHashKey) == 0 {
+		if sq != nil {
+			var err error
+			cfg.SessionHashKey, err = sq.LoadOrCreateSessionHashKey()
+			if err != nil {
+				return nil, fmt.Errorf("session hash key: %w", err)
+			}
+		} else {
+			cfg.SessionHashKey = make([]byte, 32)
+			if _, err := rand.Read(cfg.SessionHashKey); err != nil {
+				return nil, fmt.Errorf("generate session hash key: %w", err)
+			}
+		}
+	}
+
+	if cfg.APIKey == "" && cfg.Tenancy != "multi" {
+		b := make([]byte, 20)
+		if _, err := rand.Read(b); err != nil {
+			return nil, fmt.Errorf("generate api key: %w", err)
+		}
+		cfg.APIKey = "furn_" + hex.EncodeToString(b)
+	} else if len(cfg.APIKey) < 16 && cfg.Tenancy != "multi" {
 		logger.Warn("api key is shorter than 16 characters; use a stronger key in production",
 			"length", len(cfg.APIKey))
 	}
@@ -164,6 +190,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		Sessions:          sessions,
 		Audit:             auditStore,
 		APIKey:            cfg.APIKey,
+		SessionHashKey:    base64.StdEncoding.EncodeToString(cfg.SessionHashKey),
 		SCIMKey:           cfg.SCIMKey,
 		BaseURL:           httpBaseURL,
 		ProtocolURL:       protocolBase,

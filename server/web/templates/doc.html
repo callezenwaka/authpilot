@@ -18,11 +18,19 @@
   .sidebar a:hover{color:#e2e8f0;background:rgba(255,255,255,.05)}
   .sidebar a.active{color:#fff;border-left-color:#2563eb;background:rgba(37,99,235,.15)}
   .sidebar-divider{border:none;border-top:1px solid #334155;margin:12px 0}
-  .sidebar-footer{padding:16px 20px;font-size:.75rem;color:#475569}
+  .sidebar-footer{padding:16px 20px;font-size:.72rem;color:#475569;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .sidebar-footer a{display:inline;padding:0;border-left:none;color:#60a5fa;text-decoration:none;font-size:inherit}
   .sidebar-footer a:hover{background:none;text-decoration:underline}
+  .sidebar-footer-sep{color:#334155}
   /* content */
-  .content{flex:1;overflow:auto;padding:40px 48px;max-width:860px}
+  .content{flex:1;overflow:auto;padding:40px 48px}
+  .prose{max-width:800px;margin:0 auto;width:100%}
+  /* copy button */
+  .pre-wrap{position:relative}
+  .copy-btn{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:5px;padding:5px;cursor:pointer;color:#94a3b8;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .15s,color .15s,background .15s;line-height:0}
+  .pre-wrap:hover .copy-btn,.copy-btn.copied{opacity:1}
+  .copy-btn:hover{background:rgba(255,255,255,.18);color:#e2e8f0}
+  .copy-btn.copied{color:#34d399}
   /* markdown */
   .prose h1{font-size:1.75rem;font-weight:700;margin:0 0 8px;color:#0f172a}
   .prose h2{font-size:1.2rem;font-weight:700;margin:32px 0 12px;padding-bottom:6px;border-bottom:1px solid #e2e4ea;color:#1e293b}
@@ -41,6 +49,24 @@
   .prose a:hover{text-decoration:underline}
   .prose hr{border:none;border-top:1px solid #e2e4ea;margin:24px 0}
   .prose blockquote{margin:0 0 14px;padding:10px 16px;border-left:3px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:0 6px 6px 0}
+  /* provider tabs */
+  .tabs{margin:0 0 24px}
+  .tab-list{display:flex;flex-wrap:wrap;gap:0;border-bottom:2px solid #e2e4ea;margin-bottom:20px}
+  .tab-btn{background:none;border:none;padding:9px 16px;font-size:.82rem;font-weight:500;color:#64748b;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;transition:color .15s,border-color .15s;font-family:inherit}
+  .tab-btn:hover{color:#1e293b}
+  .tab-btn.active{color:#2563eb;border-bottom-color:#2563eb;font-weight:600}
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+  .tab-panel h3{font-size:.9rem;font-weight:600;margin:20px 0 8px;color:#1e293b;text-transform:uppercase;letter-spacing:.04em;font-size:.72rem;color:#64748b}
+  .tab-panel p{margin:0 0 14px;line-height:1.65;color:#374151}
+  .tab-panel pre{background:#0f172a;border-radius:6px;padding:14px 18px;overflow-x:auto;margin:0 0 16px}
+  .tab-panel pre code{background:none;border:none;padding:0;color:#e2e8f0;font-size:.82rem;font-family:ui-monospace,monospace}
+  .tab-panel code{font-family:ui-monospace,monospace;font-size:.82rem;background:#f1f5f9;border:1px solid #e2e4ea;border-radius:4px;padding:1px 5px;color:#1e40af}
+  .tab-panel table{width:100%;border-collapse:collapse;margin:0 0 16px;font-size:.85rem}
+  .tab-panel th{background:#f8fafc;text-align:left;padding:8px 12px;border:1px solid #e2e4ea;font-weight:600;color:#374151}
+  .tab-panel td{padding:8px 12px;border:1px solid #e2e4ea;color:#374151;vertical-align:top}
+  .tab-panel tr:nth-child(even) td{background:#fafafa}
+  .tab-note{margin:0 0 16px;padding:10px 14px;border-left:3px solid #2563eb;background:#eff6ff;color:#1e40af;border-radius:0 6px 6px 0;font-size:.85rem;line-height:1.5}
 </style>
 </head>
 <body>
@@ -48,7 +74,10 @@
     <a href="/" class="sidebar-logo">Fur<span>nace</span></a>
     <nav>
       <div class="sidebar-section">Docs</div>
+      <a href="/doc/installation"{{if eq .Slug "installation"}} class="active"{{end}}>Installation</a>
       <a href="/doc/onboarding"{{if eq .Slug "onboarding"}} class="active"{{end}}>Onboarding</a>
+      <a href="/doc/providers"{{if eq .Slug "providers"}} class="active"{{end}}>Providers</a>
+      <a href="/doc/integration"{{if eq .Slug "integration"}} class="active"{{end}}>Integration Guide</a>
       <a href="/doc/api-reference"{{if eq .Slug "api-reference"}} class="active"{{end}}>API Reference</a>
       <a href="/doc/configuration"{{if eq .Slug "configuration"}} class="active"{{end}}>Configuration</a>
       <a href="/doc/security"{{if eq .Slug "security"}} class="active"{{end}}>Security</a>
@@ -56,8 +85,10 @@
     </nav>
     <hr class="sidebar-divider">
     <div class="sidebar-footer">
-      <a href="/admin">Admin UI</a>&bull; &nbsp;
-      <a href="/api/v1/docs">API Docs</a> &nbsp; &bull; &nbsp;
+      <a href="/admin">Admin UI</a>
+      <span class="sidebar-footer-sep">&bull;</span>
+      <a href="/api/v1/docs">API Docs</a>
+      <span class="sidebar-footer-sep">&bull;</span>
       <a href="/login">Login</a>
     </div>
   </aside>
@@ -66,5 +97,45 @@
       {{.Body}}
     </div>
   </main>
+<script>
+function activateTab(panel){
+  document.querySelectorAll('[data-tabs]').forEach(function(tabs){
+    tabs.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active');});
+    tabs.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active');});
+    var btn=tabs.querySelector('[data-tab="'+panel+'"]');
+    var pane=tabs.querySelector('[data-panel="'+panel+'"]');
+    if(btn)btn.classList.add('active');
+    if(pane)pane.classList.add('active');
+  });
+}
+document.querySelectorAll('[data-tabs]').forEach(function(tabs){
+  tabs.querySelectorAll('.tab-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){activateTab(btn.dataset.tab);});
+  });
+});
+(function(){
+  var copySVG='<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+  var checkSVG='<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 9 17 20 7"/></svg>';
+  document.querySelectorAll('pre').forEach(function(pre){
+    var wrap=document.createElement('div');
+    wrap.className='pre-wrap';
+    pre.parentNode.insertBefore(wrap,pre);
+    wrap.appendChild(pre);
+    var btn=document.createElement('button');
+    btn.className='copy-btn';
+    btn.title='Copy';
+    btn.innerHTML=copySVG;
+    wrap.appendChild(btn);
+    btn.addEventListener('click',function(){
+      var code=pre.querySelector('code');
+      navigator.clipboard.writeText(code?code.innerText:pre.innerText).then(function(){
+        btn.innerHTML=checkSVG;
+        btn.classList.add('copied');
+        setTimeout(function(){btn.innerHTML=copySVG;btn.classList.remove('copied');},2000);
+      });
+    });
+  });
+})();
+</script>
 </body>
 </html>

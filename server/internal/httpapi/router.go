@@ -77,6 +77,7 @@ type Dependencies struct {
 	AdminStaticDir  string
 	AdminFS         fs.FS  // non-nil in prod builds: serve admin SPA from embedded FS
 	APIKey          string        // single-tenant API key; required in single mode; ignored in multi-tenant mode (per-tenant keys live in TenantEntries)
+	SessionHashKey  string        // base64-encoded session signing key; shown in Admin UI Config so users can copy it for FURNACE_SESSION_HASH_KEY
 	SCIMKey         string        // separate credential for /scim/v2; falls back to APIKey when empty
 	BaseURL         string        // e.g. "http://localhost:8025" — used for magic link URLs
 	RateLimit       int           // requests per minute per IP; 0 = disabled
@@ -135,7 +136,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	r.Use(requestIDMiddleware)
 	r.Use(instrumentMiddleware)
 
-	registerAdminRoutes(r, dep.AdminStaticDir, dep.AdminFS, dep.APIKey)
+	registerAdminRoutes(r, dep.AdminStaticDir, dep.AdminFS, dep.APIKey, dep.SessionHashKey)
 
 	r.HandleFunc("/", homeHandler(dep.APIKey)).Methods(http.MethodGet)
 
@@ -439,14 +440,14 @@ func exportHandler(users store.UserStore, groups store.GroupStore) http.HandlerF
 	}
 }
 
-func registerAdminRoutes(r *mux.Router, adminStaticDir string, adminFS fs.FS, apiKey string) {
+func registerAdminRoutes(r *mux.Router, adminStaticDir string, adminFS fs.FS, apiKey, sessionHashKey string) {
 	if adminFS != nil {
 		// Prod: serve from embedded filesystem.
 		fileServer := http.FileServer(http.FS(adminFS))
 		r.PathPrefix("/admin/assets/").Handler(http.StripPrefix("/admin/", fileServer))
 		r.Handle("/admin/vite.svg", http.StripPrefix("/admin/", fileServer))
-		r.HandleFunc("/admin", serveAdminIndexFS(adminFS, apiKey))
-		r.PathPrefix("/admin/").HandlerFunc(serveAdminIndexFS(adminFS, apiKey))
+		r.HandleFunc("/admin", serveAdminIndexFS(adminFS, apiKey, sessionHashKey))
+		r.PathPrefix("/admin/").HandlerFunc(serveAdminIndexFS(adminFS, apiKey, sessionHashKey))
 		return
 	}
 
@@ -459,19 +460,19 @@ func registerAdminRoutes(r *mux.Router, adminStaticDir string, adminFS fs.FS, ap
 
 	r.PathPrefix("/admin/assets/").Handler(adminAssets)
 	r.Handle("/admin/vite.svg", adminAssets)
-	r.HandleFunc("/admin", serveAdminIndex(adminIndexPath, apiKey))
-	r.PathPrefix("/admin/").HandlerFunc(serveAdminIndex(adminIndexPath, apiKey))
+	r.HandleFunc("/admin", serveAdminIndex(adminIndexPath, apiKey, sessionHashKey))
+	r.PathPrefix("/admin/").HandlerFunc(serveAdminIndex(adminIndexPath, apiKey, sessionHashKey))
 }
 
 // injectAdminConfig inserts window.__FURNACE__ config before </head> so the SPA
-// can read the API key at runtime without baking it into the Vite build.
-func injectAdminConfig(html []byte, apiKey string) []byte {
-	cfg, _ := json.Marshal(map[string]string{"apiKey": apiKey})
+// can read the API key and session hash key at runtime without baking them into the Vite build.
+func injectAdminConfig(html []byte, apiKey, sessionHashKey string) []byte {
+	cfg, _ := json.Marshal(map[string]string{"apiKey": apiKey, "sessionHashKey": sessionHashKey})
 	inject := []byte(`<script>window.__FURNACE__=` + string(cfg) + `</script>`)
 	return bytes.Replace(html, []byte(`</head>`), append(inject, []byte(`</head>`)...), 1)
 }
 
-func serveAdminIndexFS(adminFS fs.FS, apiKey string) http.HandlerFunc {
+func serveAdminIndexFS(adminFS fs.FS, apiKey, sessionHashKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		f, err := adminFS.Open("index.html")
 		if err != nil {
@@ -485,11 +486,11 @@ func serveAdminIndexFS(adminFS fs.FS, apiKey string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(injectAdminConfig(content, apiKey))
+		_, _ = w.Write(injectAdminConfig(content, apiKey, sessionHashKey))
 	}
 }
 
-func serveAdminIndex(indexPath, apiKey string) http.HandlerFunc {
+func serveAdminIndex(indexPath, apiKey, sessionHashKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		content, err := os.ReadFile(indexPath)
 		if err != nil {
@@ -501,7 +502,7 @@ func serveAdminIndex(indexPath, apiKey string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(injectAdminConfig(content, apiKey))
+		_, _ = w.Write(injectAdminConfig(content, apiKey, sessionHashKey))
 	}
 }
 

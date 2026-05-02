@@ -1,7 +1,7 @@
 import { UserManager } from 'oidc-auth-client'
 
 declare global {
-  interface Window { __FURNACE__?: { apiKey?: string } }
+  interface Window { __FURNACE__?: { apiKey?: string; sessionHashKey?: string } }
 }
 
 const authority = import.meta.env.VITE_OIDC_AUTHORITY as string | undefined

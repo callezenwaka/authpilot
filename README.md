@@ -38,19 +38,13 @@ go run ./server/cmd/furnace -config ./configs/furnace.yaml
 docker compose up --build
 ```
 
-**Admin API key** — on first run, Furnace generates a random key and prints it:
+**Admin API key** — auto-generated on first start. It is never printed to logs. Open the admin UI, go to **Config → Admin API Key**, and copy it from there.
 
-```
-[furnace] Admin API Key: furn_a3f9c2d18e4b7a6f0c5d2e1b9a8f3c7d4e2b
-[furnace] Set FURNACE_API_KEY env var to persist this key across restarts.
-```
-
-The key is also visible in the admin UI under **Config → Admin API Key**.
-To make it persistent, add it to a `.env` file:
+To make it persistent across restarts, add it to a `.env` file:
 
 ```bash
 # .env  (add to .gitignore)
-FURNACE_API_KEY=furn_a3f9c2d18e4b7a6f0c5d2e1b9a8f3c7d4e2b
+FURNACE_API_KEY=furn_...   # paste from Config page
 ```
 
 ### docker run
@@ -83,7 +77,8 @@ Pin a specific version by replacing `:latest` with `:v0.1.0`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FURNACE_API_KEY` | _(auto-generated)_ | Protects `/api/v1/`; printed on startup if not set |
+| `FURNACE_API_KEY` | _(auto-generated)_ | Protects `/api/v1/`; copy from Admin UI → Config → Admin API Key |
+| `FURNACE_SESSION_HASH_KEY` | _(auto-generated)_ | Signs session cookies; copy from Admin UI → Config → Session Hash Key to persist across volume wipes |
 | `FURNACE_PERSISTENCE_ENABLED` | `true` | `false` = in-memory only |
 | `FURNACE_SQLITE_PATH` | `./data/furnace.db` | SQLite database path |
 | `FURNACE_PROVIDER` | `default` | Provider personality: `okta`, `azure-ad`, `google`, `github`, `onelogin` |
@@ -170,7 +165,10 @@ git push origin server/v0.1.0
 
 | Doc | Contents |
 |-----|----------|
+| [Installation](server/web/doc/installation.md) | Docker setup, persistence options, getting your API key |
 | [Onboarding](server/web/doc/onboarding.md) | Step-by-step: create users, groups, and test a login flow |
+| [Providers](server/web/doc/providers.md) | Provider personalities — config, claims, wiring, and pitfalls |
+| [Integration Guide](server/web/doc/integration.md) | Connecting your OIDC client to Furnace |
 | [API Reference](server/web/doc/api-reference.md) | All endpoints — OIDC, SAML, WS-Fed, SCIM, management API |
 | [Configuration](server/web/doc/configuration.md) | All environment variables, multi-tenancy, SCIM client mode |
 | [Security](server/web/doc/security.md) | API key, CSRF, CORS, network exposure |

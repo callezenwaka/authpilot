@@ -45,6 +45,34 @@ func loadOrCreateSigner(db *sql.DB) (*policySigner, error) {
 	return &policySigner{privKey: priv, pubKey: priv.Public().(ed25519.PublicKey)}, nil
 }
 
+// LoadOrCreateSessionHashKey loads the HMAC session hash key from furnace_settings,
+// or generates a new 32-byte key and persists it if none exists.
+func (s *Store) LoadOrCreateSessionHashKey() ([]byte, error) {
+	var encoded string
+	err := s.db.QueryRow(`SELECT value FROM furnace_settings WHERE key = 'session_hash_key'`).Scan(&encoded)
+	if err == sql.ErrNoRows {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, fmt.Errorf("generate session hash key: %w", err)
+		}
+		encoded = base64.StdEncoding.EncodeToString(key)
+		if _, err := s.db.Exec(
+			`INSERT INTO furnace_settings (key, value) VALUES ('session_hash_key', ?)`, encoded,
+		); err != nil {
+			return nil, fmt.Errorf("persist session hash key: %w", err)
+		}
+		return key, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session hash key: %w", err)
+	}
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode session hash key: %w", err)
+	}
+	return key, nil
+}
+
 // sign returns a base64-encoded ed25519 signature of message.
 func (ps *policySigner) sign(message string) string {
 	sig := ed25519.Sign(ps.privKey, []byte(message))

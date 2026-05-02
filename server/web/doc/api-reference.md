@@ -98,7 +98,7 @@ Served on `:8025` under `/api/v1`.
 | Flow actions | `POST /api/v1/flows/{id}/select-user` · `verify-mfa` · `approve` · `deny` · `webauthn-response` |
 | Sessions | `GET /api/v1/sessions` |
 | Notifications | `GET /api/v1/notifications?flow_id=<id>`, `GET /api/v1/notifications/all` |
-| Audit | `GET /api/v1/audit`, `GET /api/v1/audit/export?format=<fmt>` |
+| Audit | `GET /api/v1/audit`, `GET /api/v1/audit/export?format=<fmt>`, `GET /api/v1/audit/verify` |
 | Tokens | `POST /api/v1/tokens/mint` |
 | Config | `GET /api/v1/config`, `PATCH /api/v1/config` |
 | SCIM events | `GET /api/v1/scim/events` |
@@ -123,6 +123,25 @@ curl "http://localhost:8025/api/v1/audit?event_type=user.created&since=2026-01-0
 curl http://localhost:8025/api/v1/audit/export?format=json-nd -o audit.jsonl
 curl http://localhost:8025/api/v1/audit/export?format=cef     -o audit.cef
 curl http://localhost:8025/api/v1/audit/export?format=syslog  -o audit.log
+```
+
+#### Audit Log Integrity
+
+`GET /api/v1/audit/verify` walks every entry in the audit log and recomputes the
+tamper-evident hash chain. Returns `200` with `"ok": true` when the chain is
+intact, or `409` with `"ok": false` and a `broken_at` event ID when a mismatch
+is detected.
+
+```bash
+curl http://localhost:8025/api/v1/audit/verify
+```
+
+```json
+{ "ok": true, "checked": 1042, "message": "chain intact" }
+```
+
+```json
+{ "ok": false, "checked": 207, "broken_at": "evt_0a1b2c3d", "message": "hash mismatch" }
 ```
 
 ### Token Minting

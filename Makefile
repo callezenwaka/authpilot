@@ -1,5 +1,8 @@
 .PHONY: build test lint check-ports run run-auto run-default run-bg stop health admin-build notify-build dev setup
 
+-include .env
+export
+
 RUN_HTTP_ADDR ?= :18025
 RUN_PROTOCOL_ADDR ?= :18026
 DEFAULT_HTTP_ADDR ?= :8025

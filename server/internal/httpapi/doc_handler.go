@@ -20,7 +20,10 @@ var md = goldmark.New(
 )
 
 var docMeta = map[string]string{
+	"installation":     "Installation",
 	"onboarding":       "Onboarding",
+	"providers":        "Providers",
+	"integration":      "Integration Guide",
 	"api-reference":    "API Reference",
 	"configuration":    "Configuration",
 	"security":         "Security",

@@ -86,6 +86,29 @@
       </div>
     </div>
 
+    <!-- Session Hash Key -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <h2>Session Hash Key</h2>
+        <span class="badge badge-gray">restart required to change</span>
+      </div>
+      <div class="card-body">
+        <p style="margin:0 0 14px;font-size:13px;color:var(--text-muted)">
+          Signs login session cookies. Auto-generated on first start and stored automatically when a volume is present.
+          Copy this value and set <code>FURNACE_SESSION_HASH_KEY</code> only if you need sessions to survive a full volume wipe (e.g. migrating to a new server).
+        </p>
+        <div class="key-row">
+          <code class="key-display">{{ sessionKeyVisible ? sessionHashKey : maskedSessionKey }}</code>
+          <button class="btn btn-ghost btn-sm" @click="sessionKeyVisible = !sessionKeyVisible">
+            {{ sessionKeyVisible ? 'Hide' : 'Show' }}
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="copySessionKey">
+            {{ sessionKeyCopied ? 'Copied!' : 'Copy' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loadError" class="error-msg">{{ loadError }}</div>
   </div>
 </template>
@@ -107,6 +130,21 @@ async function copyKey() {
   await navigator.clipboard.writeText(adminApiKey)
   keyCopied.value = true
   setTimeout(() => { keyCopied.value = false }, 2000)
+}
+
+const sessionHashKey    = window.__FURNACE__?.sessionHashKey ?? ''
+const sessionKeyVisible = ref(false)
+const sessionKeyCopied  = ref(false)
+
+const maskedSessionKey = computed(() =>
+  sessionHashKey ? sessionHashKey.slice(0, 8) + '•'.repeat(Math.max(0, sessionHashKey.length - 8)) : '—'
+)
+
+async function copySessionKey() {
+  if (!sessionHashKey) return
+  await navigator.clipboard.writeText(sessionHashKey)
+  sessionKeyCopied.value = true
+  setTimeout(() => { sessionKeyCopied.value = false }, 2000)
 }
 
 interface TTLs {

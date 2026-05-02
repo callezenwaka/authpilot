@@ -62,6 +62,64 @@ receive a matching CORS response header.
 
 ---
 
+## OIDC Signing Key Rotation
+
+Furnace issues tokens signed with an RSA-3072 key. The active key is published
+at `/.well-known/jwks.json`; retired keys remain in the set for the configured
+overlap window so in-flight tokens continue to verify until they expire.
+
+Enable automatic rotation:
+
+```bash
+FURNACE_KEY_ROTATION_INTERVAL=24h   # rotate daily
+FURNACE_KEY_ROTATION_OVERLAP=48h    # keep retired key in JWKS for 48 h
+```
+
+Rotation failures are logged at `WARN` and do not crash the server. The overlap
+window should be at least as long as your longest JWKS consumer cache TTL.
+
+---
+
+## OPA Decision Log Hardening
+
+The OPA decision log can contain sensitive claim values. Controls available:
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `include_input` | `false` | Opt-in to logging the full input document |
+| `redact_fields` | `[]` | Dot-paths redacted to `[REDACTED]` before writing |
+| `scrub_policy_credentials` | `false` | Remove bearer tokens / passwords from policy text |
+| `retention_days` | `0` (unlimited) | Prune entries older than N days on startup |
+
+In multi-tenant mode, each tenant can add further restrictions via
+`opa.tenant_budgets.<id>.decision_log`. Per-tenant settings are strictly
+additive — they can redact more fields and shorten retention, but cannot
+re-enable fields the global config suppresses.
+
+See [Configuration → OPA Decision Log](configuration#opa-decision-log) for YAML
+examples.
+
+---
+
+## Audit Log Integrity
+
+The SQLite audit log uses an append-only table with a tamper-evident SHA-256
+hash chain. Each row's `chain_hash` covers the previous row's hash and the
+current event JSON, so any row deletion or modification breaks the chain.
+
+Verify the chain at any time:
+
+```bash
+curl http://localhost:8025/api/v1/audit/verify
+```
+
+Returns `200 {"ok": true}` when the chain is intact or `409 {"ok": false,
+"broken_at": "<event-id>"}` at the first mismatch. The in-memory store
+(persistence disabled) returns `ok: true` with a note that no chain is
+maintained.
+
+---
+
 ## Network Exposure
 
 Furnace binds to `0.0.0.0` by default. Before exposing to a network:

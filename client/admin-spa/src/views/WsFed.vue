@@ -7,14 +7,14 @@
     <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:24px">
       <div class="stat-card">
         <div class="label">Passive Endpoint</div>
-        <div class="value" style="font-size:13px;font-weight:500;margin-top:6px">
-          <code>:8026/wsfed</code>
+        <div class="value" style="font-size:13px;font-weight:500;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <code>{{ protocolURL }}/wsfed</code>
         </div>
       </div>
       <div class="stat-card">
         <div class="label">Metadata Endpoint</div>
-        <div class="value" style="font-size:13px;font-weight:500;margin-top:6px">
-          <code>:8026/federationmetadata/…</code>
+        <div class="value" style="font-size:13px;font-weight:500;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <code>{{ protocolURL }}/federationmetadata/…</code>
         </div>
       </div>
       <div class="stat-card">
@@ -34,7 +34,7 @@
       </div>
       <div class="card-body" style="padding:18px">
         <ol style="margin:0;padding-left:20px;line-height:2;font-size:13px">
-          <li>Relying party redirects browser to <code>:8026/wsfed?wa=wsignin1.0&amp;wtrealm=&lt;realm&gt;&amp;wreply=&lt;url&gt;</code></li>
+          <li>Relying party redirects browser to <code>{{ protocolURL }}/wsfed?wa=wsignin1.0&amp;wtrealm=&lt;realm&gt;&amp;wreply=&lt;url&gt;</code></li>
           <li>Furnace validates <code>wtrealm</code>, creates a flow, and redirects to <code>/login</code></li>
           <li>User completes login; Furnace creates a session and redirects back to <code>/wsfed</code> with <code>wsfed_flow_id</code></li>
           <li>Furnace builds a signed WS-Trust RSTR (SAML 1.1 assertion) and auto-submits it to <code>wreply</code></li>
@@ -49,7 +49,7 @@
       </div>
       <div class="card-body" style="padding:18px">
         <ol style="margin:0;padding-left:20px;line-height:2;font-size:13px">
-          <li>Relying party redirects browser to <code>:8026/wsfed?wa=wsignout1.0&amp;wreply=&lt;url&gt;</code></li>
+          <li>Relying party redirects browser to <code>{{ protocolURL }}/wsfed?wa=wsignout1.0&amp;wreply=&lt;url&gt;</code></li>
           <li>Furnace invalidates all sessions</li>
           <li>Browser is redirected to <code>wreply</code>, or a sign-out confirmation page is shown if <code>wreply</code> is absent</li>
         </ol>
@@ -75,7 +75,7 @@
       <div class="card-body" style="padding:18px">
         <pre v-if="metadataXML" style="font-size:11px;margin:0;overflow-x:auto;white-space:pre-wrap;word-break:break-all">{{ metadataXML }}</pre>
         <div v-else class="empty" style="padding:24px">
-          {{ metaStatus === 'checking' ? 'Loading metadata from :8026…' : 'Could not reach :8026. Is the protocol server running?' }}
+          {{ metaStatus === 'checking' ? `Loading metadata from ${protocolURL}…` : `Could not reach ${protocolURL}. Is the protocol server running?` }}
         </div>
       </div>
     </div>
@@ -101,13 +101,13 @@
             <tr>
               <td style="padding:6px 12px 6px 0;color:var(--text-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Sign-in</td>
               <td style="padding:6px 0">
-                <code style="font-size:12px">http://localhost:8026/wsfed?wa=wsignin1.0&amp;wtrealm=&lt;realm&gt;&amp;wreply=&lt;url&gt;</code>
+                <code style="font-size:12px">{{ protocolURL }}/wsfed?wa=wsignin1.0&amp;wtrealm=&lt;realm&gt;&amp;wreply=&lt;url&gt;</code>
               </td>
             </tr>
             <tr>
               <td style="padding:6px 12px 6px 0;color:var(--text-muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">Sign-out</td>
               <td style="padding:6px 0">
-                <code style="font-size:12px">http://localhost:8026/wsfed?wa=wsignout1.0&amp;wreply=&lt;url&gt;</code>
+                <code style="font-size:12px">{{ protocolURL }}/wsfed?wa=wsignout1.0&amp;wreply=&lt;url&gt;</code>
               </td>
             </tr>
           </tbody>
@@ -137,7 +137,7 @@ async function loadMetadata() {
   metaStatus.value = 'checking'
   metadataXML.value = ''
   try {
-    const res = await apiFetch(
+    const res = await fetch(
       `${protocolURL.value}/federationmetadata/2007-06/federationmetadata.xml`,
       { signal: AbortSignal.timeout(3000) }
     )
