@@ -110,6 +110,7 @@
 <script setup lang="ts">
 import { apiFetch } from '../auth'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useSSE } from '../composables/useSSE'
 
 interface NotifyPayload {
   flow_id: string
@@ -141,7 +142,6 @@ const items     = ref<NotifyPayload[]>([])
 const now       = ref(Date.now())
 const isOpen    = ref(false)
 
-let pollTimer:  ReturnType<typeof setInterval> | null = null
 let clockTimer: ReturnType<typeof setInterval> | null = null
 
 const totpItems    = computed(() => items.value.filter(i => i.type === 'totp'))
@@ -171,12 +171,10 @@ async function load() {
 
 function startPolling() {
   load()
-  pollTimer  = setInterval(load, 3000)
   clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
 }
 
 function stopPolling() {
-  if (pollTimer)  { clearInterval(pollTimer);  pollTimer  = null }
   if (clockTimer) { clearInterval(clockTimer); clockTimer = null }
 }
 
@@ -218,8 +216,9 @@ async function deny(item: NotifyPayload) {
 }
 
 
+useSSE({ flows: load })
+
 onMounted(() => {
-  // Initial lightweight fetch so the badge count is available immediately
   load()
 })
 

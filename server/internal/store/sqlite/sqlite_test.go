@@ -303,3 +303,21 @@ func TestPersistenceRoundTripUsersAndGroups(t *testing.T) {
 		t.Fatalf("group name mismatch, want %q got %q", group.Name, gotGroup.Name)
 	}
 }
+
+func TestUserStore_DuplicateEmail(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "furnace.db")
+	s, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer s.Close()
+
+	u := domain.User{ID: "usr_a", Email: "alice@example.com", CreatedAt: time.Now().UTC()}
+	if _, err := s.Users().Create(u); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	_, err = s.Users().Create(domain.User{ID: "usr_b", Email: "alice@example.com", CreatedAt: time.Now().UTC()})
+	if !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("expected ErrConflict on duplicate email, got %v", err)
+	}
+}

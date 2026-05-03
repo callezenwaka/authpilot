@@ -20,6 +20,11 @@ func NewUserStore() *UserStore {
 func (s *UserStore) Create(user domain.User) (domain.User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, u := range s.users {
+		if u.Email == user.Email {
+			return domain.User{}, store.ErrConflict
+		}
+	}
 	s.users[user.ID] = cloneUser(user)
 	return cloneUser(user), nil
 }

@@ -51,7 +51,7 @@ func (s *Store) migrate() error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
-			email TEXT NOT NULL,
+			email TEXT NOT NULL UNIQUE,
 			display_name TEXT NOT NULL,
 			groups_json TEXT NOT NULL,
 			mfa_method TEXT NOT NULL,

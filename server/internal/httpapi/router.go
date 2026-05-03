@@ -120,6 +120,10 @@ type Dependencies struct {
 	// APIKeyStore, if non-nil, enables the /api/v1/api-keys/* endpoints and allows
 	// DB-issued keys to authenticate requests in addition to the static APIKey.
 	APIKeyStore    store.APIKeyStore
+	// Broadcaster, if non-nil, enables GET /api/v1/events (SSE) and is signalled
+	// after every user/group/flow/session mutation so connected admin tabs update
+	// in real time without polling.
+	Broadcaster    *SSEBroadcaster
 }
 
 // resolveStores returns the correct store set for the request context.
@@ -229,13 +233,23 @@ func NewRouter(dep Dependencies) http.Handler {
 	idempStore := newIdempotencyStore(5 * time.Minute)
 	api.Use(idempotencyMiddleware(idempStore))
 
+	if dep.Broadcaster != nil {
+		api.HandleFunc("/events", sseHandler(dep.Broadcaster)).Methods(http.MethodGet)
+	}
+
+	bc := dep.Broadcaster // shorthand; nil-safe — callers check before Send
+
 	api.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		users, _, _, _, _ := dep.resolveStores(r.Context())
 		listUsersHandler(users)(w, r)
 	}).Methods(http.MethodGet)
 	api.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		users, groups, _, _, as := dep.resolveStores(r.Context())
-		createUserHandler(users, groups, as, dep.SCIMClient)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		createUserHandler(users, groups, as, dep.SCIMClient)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("users")
+		}
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		users, _, _, _, _ := dep.resolveStores(r.Context())
@@ -243,11 +257,19 @@ func NewRouter(dep Dependencies) http.Handler {
 	}).Methods(http.MethodGet)
 	api.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		users, groups, _, _, as := dep.resolveStores(r.Context())
-		updateUserHandler(users, groups, as, dep.SCIMClient)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		updateUserHandler(users, groups, as, dep.SCIMClient)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("users")
+		}
 	}).Methods(http.MethodPut)
 	api.HandleFunc("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		users, _, _, _, as := dep.resolveStores(r.Context())
-		deleteUserHandler(users, as, dep.SCIMClient)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		deleteUserHandler(users, as, dep.SCIMClient)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("users")
+		}
 	}).Methods(http.MethodDelete)
 
 	api.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +278,11 @@ func NewRouter(dep Dependencies) http.Handler {
 	}).Methods(http.MethodGet)
 	api.HandleFunc("/groups", func(w http.ResponseWriter, r *http.Request) {
 		_, groups, _, _, _ := dep.resolveStores(r.Context())
-		createGroupHandler(groups)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		createGroupHandler(groups)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("groups")
+		}
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/groups/{id}", func(w http.ResponseWriter, r *http.Request) {
 		_, groups, _, _, _ := dep.resolveStores(r.Context())
@@ -264,11 +290,19 @@ func NewRouter(dep Dependencies) http.Handler {
 	}).Methods(http.MethodGet)
 	api.HandleFunc("/groups/{id}", func(w http.ResponseWriter, r *http.Request) {
 		_, groups, _, _, _ := dep.resolveStores(r.Context())
-		updateGroupHandler(groups)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		updateGroupHandler(groups)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("groups")
+		}
 	}).Methods(http.MethodPut)
 	api.HandleFunc("/groups/{id}", func(w http.ResponseWriter, r *http.Request) {
 		_, groups, _, _, _ := dep.resolveStores(r.Context())
-		deleteGroupHandler(groups)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		deleteGroupHandler(groups)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("groups")
+		}
 	}).Methods(http.MethodDelete)
 
 	api.HandleFunc("/flows", func(w http.ResponseWriter, r *http.Request) {
@@ -293,11 +327,19 @@ func NewRouter(dep Dependencies) http.Handler {
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/flows/{id}/approve", func(w http.ResponseWriter, r *http.Request) {
 		users, _, flows, _, as := dep.resolveStores(r.Context())
-		approveFlowHandler(flows, users, as)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		approveFlowHandler(flows, users, as)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("flows")
+		}
 	}).Methods(http.MethodPost)
 	api.HandleFunc("/flows/{id}/deny", func(w http.ResponseWriter, r *http.Request) {
 		_, _, flows, _, as := dep.resolveStores(r.Context())
-		denyFlowHandler(flows, as, dep.AuthEventSink, dep.TrustedProxyCIDRs)(w, r)
+		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		denyFlowHandler(flows, as, dep.AuthEventSink, dep.TrustedProxyCIDRs)(rw, r)
+		if bc != nil && rw.status < 300 {
+			bc.Send("flows")
+		}
 	}).Methods(http.MethodPost)
 
 	api.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
@@ -612,6 +654,10 @@ func createUserHandler(users store.UserStore, groups store.GroupStore, as store.
 		}
 		created, err := users.Create(user)
 		if err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				writeError(w, http.StatusConflict, "email_conflict", "a user with that email already exists")
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "create_user_failed", err.Error())
 			return
 		}

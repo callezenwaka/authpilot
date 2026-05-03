@@ -9,6 +9,7 @@ import (
 
 var (
 	ErrNotFound       = errors.New("not found")
+	ErrConflict       = errors.New("already exists")
 	ErrPolicyTampered = errors.New("policy content integrity check failed")
 )
 

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -110,5 +111,17 @@ func TestConsumeAuthCode_ConcurrentRedeem(t *testing.T) {
 	// Code is now consumed; a fresh attempt also fails.
 	if _, err := s.ConsumeAuthCode("code-xyz"); err != store.ErrNotFound {
 		t.Errorf("expected ErrNotFound after consumption, got %v", err)
+	}
+}
+
+func TestUserStore_DuplicateEmail(t *testing.T) {
+	s := NewUserStore()
+	u := domain.User{ID: "usr_a", Email: "alice@example.com"}
+	if _, err := s.Create(u); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	_, err := s.Create(domain.User{ID: "usr_b", Email: "alice@example.com"})
+	if !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("expected ErrConflict on duplicate email, got %v", err)
 	}
 }

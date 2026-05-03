@@ -6,7 +6,7 @@ declare global {
 
 const authority = import.meta.env.VITE_OIDC_AUTHORITY as string | undefined
 // Runtime key injected by the server takes precedence over build-time env var.
-const apiKey: string | undefined = window.__FURNACE__?.apiKey ?? import.meta.env.VITE_API_KEY
+export const apiKey: string | undefined = window.__FURNACE__?.apiKey ?? import.meta.env.VITE_API_KEY
 
 export const oidcEnabled = !!authority
 

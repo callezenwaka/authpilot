@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"furnace/server/internal/domain"
@@ -34,6 +35,9 @@ func (s *UserStore) Create(user domain.User) (domain.User, error) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, user.ID, user.Email, user.DisplayName, groupsJSON, user.MFAMethod, user.NextFlow, claimsJSON, user.PhoneNumber, user.PasswordHash, boolToInt(user.Active), user.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.email") {
+			return domain.User{}, store.ErrConflict
+		}
 		return domain.User{}, fmt.Errorf("insert user: %w", err)
 	}
 	return user, nil

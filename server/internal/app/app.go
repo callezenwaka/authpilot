@@ -221,6 +221,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		OPAEngine:         opaEngine,
 		OPAPolicies:       policies,
 		APIKeyStore:       apiKeys,
+		Broadcaster:       httpapi.NewSSEBroadcaster(),
 	})
 
 	httpServer := &http.Server{

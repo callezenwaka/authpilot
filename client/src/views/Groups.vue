@@ -7,10 +7,11 @@
 
     <div class="card">
       <div class="card-header">
-        <h2>{{ groups.length }} group{{ groups.length !== 1 ? 's' : '' }}</h2>
+        <h2>{{ filtered.length }} group{{ filtered.length !== 1 ? 's' : '' }}</h2>
+        <input v-model="search" class="search-input" placeholder="Search by ID or name…" />
       </div>
       <div class="table-wrap">
-        <table v-if="groups.length">
+        <table v-if="filtered.length">
           <thead>
             <tr>
               <th>ID</th>
@@ -20,7 +21,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="g in groups" :key="g.id">
+            <tr v-for="g in filtered" :key="g.id">
               <td><code>{{ g.id }}</code></td>
               <td>{{ g.display_name || g.name }}</td>
               <td>{{ g.member_ids?.length ?? 0 }}</td>
@@ -77,7 +78,8 @@
 
 <script setup lang="ts">
 import { apiFetch } from '../auth'
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useSSE } from '../composables/useSSE'
 
 interface Group {
   id: string
@@ -87,6 +89,15 @@ interface Group {
 }
 
 const groups = ref<Group[]>([])
+const search = ref('')
+const filtered = computed(() => {
+  const q = search.value.toLowerCase().trim()
+  if (!q) return groups.value
+  return groups.value.filter(g =>
+    g.id.toLowerCase().includes(q) ||
+    (g.display_name || g.name || '').toLowerCase().includes(q)
+  )
+})
 const modal = ref<Partial<Group> | null>(null)
 const editingId = ref('')
 const memberText = ref('')
@@ -141,4 +152,5 @@ async function deleteGroup(g: Group) {
 }
 
 onMounted(load)
+useSSE({ groups: load })
 </script>

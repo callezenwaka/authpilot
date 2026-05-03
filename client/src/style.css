@@ -112,6 +112,18 @@ body { margin: 0; background: var(--bg); }
 .card-header h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .card-body { padding: 18px; }
 
+.search-input {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  width: 220px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+}
+.search-input:focus { border-color: var(--primary); }
+
 /* ── Stat grid (dashboard) ── */
 .stat-grid {
   display: grid;

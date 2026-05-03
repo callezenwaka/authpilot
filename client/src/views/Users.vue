@@ -8,11 +8,7 @@
     <div class="card">
       <div class="card-header">
         <h2>{{ users.length }} user{{ users.length !== 1 ? 's' : '' }}</h2>
-        <input
-          v-model="search"
-          placeholder="Search by email or name…"
-          style="padding:5px 9px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;width:220px"
-        />
+        <input v-model="search" class="search-input" placeholder="Search by email or name…" />
       </div>
       <div class="table-wrap">
         <table v-if="filtered.length">
@@ -106,6 +102,7 @@
 <script setup lang="ts">
 import { apiFetch } from '../auth'
 import { ref, computed, onMounted } from 'vue'
+import { useSSE } from '../composables/useSSE'
 
 interface User {
   id: string
@@ -194,4 +191,5 @@ function mfaBadge(method: string) {
 }
 
 onMounted(load)
+useSSE({ users: load })
 </script>

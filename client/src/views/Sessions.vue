@@ -61,6 +61,7 @@
 <script setup lang="ts">
 import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
+import { useSSE } from '../composables/useSSE'
 
 interface Session {
   id: string
@@ -88,4 +89,5 @@ function formatDate(iso: string) {
 }
 
 onMounted(load)
+useSSE({ sessions: load })
 </script>

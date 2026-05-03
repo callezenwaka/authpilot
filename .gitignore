@@ -38,10 +38,3 @@ pnpm-debug.log*
 .bin/
 roadmap-v*.md
 spec-v*.md
-onboard.md
-onboarding.md
-opa-deployment-security.md
-entra-id-end-to-end-guide.md
-google-workspace-end-to-end-guide.md
-okta-end-to-end-guide.md
-furnace-business-model.md

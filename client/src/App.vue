@@ -80,9 +80,10 @@
 
 <script setup lang="ts">
 import { apiFetch, oidcEnabled, userManager } from './auth'
-import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
+import { ref, computed, onMounted, provide } from 'vue'
 import { useRoute } from 'vue-router'
 import NotifyDialog from './components/NotifyDialog.vue'
+import { useSSE } from './composables/useSSE'
 
 const route = useRoute()
 
@@ -93,7 +94,6 @@ const notifyDialog = ref<InstanceType<typeof NotifyDialog> | null>(null)
 provide('activeTenant', activeTenant)
 
 const notifyCount = ref(0)
-let badgePoll: ReturnType<typeof setInterval>
 
 async function fetchBadgeCount() {
   try {
@@ -104,6 +104,8 @@ async function fetchBadgeCount() {
     }
   } catch { /* server unreachable */ }
 }
+
+useSSE({ flows: fetchBadgeCount })
 
 async function loadTenants() {
   try {
@@ -134,10 +136,7 @@ const pageTitle = computed(() => {
 onMounted(() => {
   loadTenants()
   fetchBadgeCount()
-  badgePoll = setInterval(fetchBadgeCount, 10000)
 })
-
-onUnmounted(() => clearInterval(badgePoll))
 </script>
 
 <style scoped>

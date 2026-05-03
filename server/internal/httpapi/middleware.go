@@ -351,13 +351,17 @@ func idempotencyMiddleware(store *idempotencyStore) func(http.Handler) http.Hand
 	}
 }
 
-// extractAPIKey reads the API key from X-Furnace-Api-Key or Authorization: Bearer <key>.
+// extractAPIKey reads the API key from X-Furnace-Api-Key, Authorization: Bearer,
+// or the ?api_key= query parameter (used by EventSource which cannot set headers).
 func extractAPIKey(r *http.Request) string {
 	if key := r.Header.Get("X-Furnace-Api-Key"); key != "" {
 		return key
 	}
 	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	if key := r.URL.Query().Get("api_key"); key != "" {
+		return key
 	}
 	return ""
 }

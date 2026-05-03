@@ -180,6 +180,7 @@
 <script setup lang="ts">
 import { apiFetch } from '../auth'
 import { ref, onMounted } from 'vue'
+import { useSSE } from '../composables/useSSE'
 
 interface SCIMUser {
   id: string
@@ -309,4 +310,5 @@ onMounted(() => {
   loadSPC()
   loadEvents()
 })
+useSSE({ users: loadUsers, groups: loadGroups })
 </script>

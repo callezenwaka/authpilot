@@ -60,3 +60,10 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
 }
+
+// Flush implements http.Flusher so SSE streaming works through this wrapper.
+func (r *statusRecorder) Flush() {
+	if fl, ok := r.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
+}

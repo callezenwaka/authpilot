@@ -22,6 +22,10 @@
   .user-name{font-size:.9rem;font-weight:500}
   .user-meta{font-size:.78rem;color:#6b7280}
   .mfa-badge{display:inline-block;padding:1px 6px;border-radius:999px;font-size:.7rem;font-weight:600;background:#dbeafe;color:#1d4ed8;margin-left:4px}
+  .search{width:100%;padding:8px 10px;border:1px solid #e2e4ea;border-radius:6px;font-size:.875rem;margin-bottom:12px;outline:none;transition:border-color .15s}
+  .search:focus{border-color:#2563eb}
+  .user-list{max-height:320px;overflow-y:auto;margin-bottom:4px}
+  .no-match{color:#6b7280;font-size:.875rem;padding:8px 0;display:none}
   button{width:100%;margin-top:16px;padding:9px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:.95rem;font-weight:500;cursor:pointer;transition:background .15s}
   button:hover{background:#1d4ed8}
 </style>
@@ -34,17 +38,38 @@
     {{if .HasError}}<div class="err">{{.Error}}</div>{{end}}
     <form method="post" action="/login/select-user?flow_id={{.FlowID}}">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-      {{range .Users}}
-        <label class="user-option">
-          <input type="radio" name="user_id" value="{{.ID}}" required>
-          <div class="user-label">
-            <span class="user-name">{{.DisplayName}}{{if .MFAMethod}}<span class="mfa-badge">{{.MFAMethod}}</span>{{end}}</span>
-            <span class="user-meta">{{.Email}}</span>
-          </div>
-        </label>
+      {{if gt (len .Users) 5}}
+      <input id="search" class="search" type="search" placeholder="Search by name or email…" autocomplete="off" autofocus>
       {{end}}
+      <div class="user-list" id="user-list">
+        {{range .Users}}
+          <label class="user-option" data-name="{{.DisplayName}}" data-email="{{.Email}}">
+            <input type="radio" name="user_id" value="{{.ID}}" required>
+            <div class="user-label">
+              <span class="user-name">{{.DisplayName}}{{if .MFAMethod}}<span class="mfa-badge">{{.MFAMethod}}</span>{{end}}</span>
+              <span class="user-meta">{{.Email}}</span>
+            </div>
+          </label>
+        {{end}}
+        <p class="no-match" id="no-match">No users match your search.</p>
+      </div>
       <button type="submit">Continue</button>
     </form>
+    <script>
+      const search = document.getElementById('search');
+      if (search) {
+        search.addEventListener('input', function() {
+          const q = this.value.toLowerCase().trim();
+          let visible = 0;
+          document.querySelectorAll('.user-option').forEach(function(el) {
+            const match = !q || el.dataset.name.toLowerCase().includes(q) || el.dataset.email.toLowerCase().includes(q);
+            el.style.display = match ? '' : 'none';
+            if (match) visible++;
+          });
+          document.getElementById('no-match').style.display = visible === 0 ? '' : 'none';
+        });
+      }
+    </script>
   </div>
 </body>
 </html>
