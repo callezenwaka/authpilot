@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Furnace — Local-First Auth Dev Platform</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#111827;display:flex;min-height:100vh;background:#f5f6fa}
+  /* sidebar */
+  .sidebar{width:220px;flex-shrink:0;background:#1e293b;color:#cbd5e1;display:flex;flex-direction:column;padding:0;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto}
+  .sidebar-logo{padding:20px 20px 16px;font-weight:700;font-size:16px;color:#fff;letter-spacing:.02em;text-decoration:none;display:block}
+  .sidebar-logo span{color:#60a5fa}
+  .sidebar-section{padding:8px 12px 4px;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
+  .sidebar nav{flex:1}
+  .sidebar a{display:block;padding:7px 20px;color:#94a3b8;text-decoration:none;font-size:.85rem;border-left:3px solid transparent;transition:color .15s,border-color .15s,background .15s}
+  .sidebar a:hover{color:#e2e8f0;background:rgba(255,255,255,.05)}
+  .sidebar a.active{color:#fff;border-left-color:#2563eb;background:rgba(37,99,235,.15)}
+  .sidebar-divider{border:none;border-top:1px solid #334155;margin:12px 0}
+  .sidebar-footer{padding:16px 20px;font-size:.72rem;color:#475569;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .sidebar-footer a{display:inline;padding:0;border-left:none;color:#60a5fa;text-decoration:none;font-size:inherit}
+  .sidebar-footer a:hover{background:none;text-decoration:underline}
+  .sidebar-footer-sep{color:#334155}
+  /* content */
+  .content{flex:1;overflow:auto;padding:40px 48px}
+  .page{max-width:860px;margin:0 auto}
+  /* hero — centered column */
+  .hero{display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:52px;padding-bottom:48px;border-bottom:1px solid #e2e4ea}
+  .hero-logo{border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(30,41,59,.14);margin-bottom:28px}
+  .hero-logo img{display:block;width:260px;height:auto}
+  .hero h1{font-size:1.75rem;font-weight:800;color:#0f172a;margin:0 0 12px;letter-spacing:-.02em}
+  .hero p{margin:0 0 24px;color:#475569;line-height:1.65;font-size:.95rem;max-width:520px}
+  .hero-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:9px 20px;border-radius:8px;font-size:.85rem;font-weight:600;text-decoration:none;transition:background .15s,color .15s}
+  .btn-primary{background:#2563eb;color:#fff}
+  .btn-primary:hover{background:#1d4ed8}
+  .btn-secondary{background:#f1f5f9;color:#1e293b;border:1px solid #e2e4ea}
+  .btn-secondary:hover{background:#e2e8f0}
+  /* section label */
+  .section-title{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin:0 0 16px}
+  /* phases */
+  .phases{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:48px}
+  .phase{background:#fff;border:1px solid #e2e4ea;border-radius:12px;padding:24px}
+  .phase-label{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#2563eb;margin-bottom:10px}
+  .phase h2{font-size:1rem;font-weight:700;color:#0f172a;margin:0 0 14px}
+  .phase ul{margin:0;padding-left:18px;color:#475569;line-height:1.7;font-size:.85rem}
+  .phase ul li{margin-bottom:2px}
+  /* feature grid */
+  .features{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:48px}
+  .feature{background:#fff;border:1px solid #e2e4ea;border-radius:10px;padding:18px}
+  .feature-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+  .feature-icon svg{width:18px;height:18px}
+  .feature h3{font-size:.85rem;font-weight:700;color:#0f172a;margin:0 0 6px}
+  .feature p{font-size:.8rem;color:#64748b;margin:0;line-height:1.55}
+  /* quick start */
+  .quickstart{background:#fff;border:1px solid #e2e4ea;border-radius:12px;padding:28px;margin-bottom:48px}
+  .quickstart h2{font-size:1rem;font-weight:700;color:#0f172a;margin:0 0 6px}
+  .quickstart .sub{color:#64748b;font-size:.85rem;margin:0 0 18px}
+  pre{background:#0f172a;border-radius:8px;padding:16px 20px;overflow-x:auto;margin:0}
+  code{font-family:ui-monospace,monospace;font-size:.82rem;color:#e2e8f0}
+  .comment{color:#64748b}
+  .quickstart-note{margin:14px 0 0;font-size:.82rem;color:#64748b}
+  /* ports */
+  .ports{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .port{background:#fff;border:1px solid #e2e4ea;border-radius:10px;padding:18px 20px;display:flex;align-items:flex-start;gap:14px}
+  .port-badge{font-family:ui-monospace,monospace;font-size:.75rem;font-weight:700;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:6px;padding:4px 8px;flex-shrink:0;margin-top:1px}
+  .port h3{font-size:.85rem;font-weight:700;color:#0f172a;margin:0 0 4px}
+  .port p{font-size:.8rem;color:#64748b;margin:0;line-height:1.5}
+  /* inline code */
+  .code-rose{font-size:.75rem;background:#ffe4e6;border:none;padding:1px 4px;color:#be123c;border-radius:3px}
+  /* colors */
+  .blue{background:#eff6ff;color:#2563eb}
+  .purple{background:#f5f3ff;color:#7c3aed}
+  .green{background:#f0fdf4;color:#16a34a}
+  .amber{background:#fffbeb;color:#d97706}
+  .rose{background:#fff1f2;color:#e11d48}
+  .teal{background:#f0fdfa;color:#0d9488}
+  .slate{background:#f8fafc;color:#475569}
+  .indigo{background:#eef2ff;color:#4338ca}
+</style>
+</head>
+<body>
+  <aside class="sidebar">
+    <a href="/doc/index" class="sidebar-logo">Fur<span>nace</span></a>
+    <nav>
+      <div class="sidebar-section">Docs</div>
+      <a href="/doc/index" class="active">Overview</a>
+      <a href="/doc/installation">Installation</a>
+      <a href="/doc/onboarding">Onboarding</a>
+      <a href="/doc/providers">Providers</a>
+      <a href="/doc/integration">Integration Guide</a>
+      <a href="/doc/api-reference">API Reference</a>
+      <a href="/doc/configuration">Configuration</a>
+      <a href="/doc/security">Security</a>
+      <a href="/doc/login-simulation">Login Simulation</a>
+    </nav>
+    <hr class="sidebar-divider">
+    <div class="sidebar-footer">
+      <a href="/admin">Admin UI</a>
+      <span class="sidebar-footer-sep">&bull;</span>
+      <a href="/api/v1/docs">API Docs</a>
+      <span class="sidebar-footer-sep">&bull;</span>
+      <a href="/login">Login</a>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="page">
+
+      <!-- Hero -->
+      <div class="hero">
+        <div class="hero-logo">
+          <img src="/furnace.svg" alt="Furnace">
+        </div>
+        <h1>Local-first auth, built for developers</h1>
+        <p>Build and test OIDC, SAML, and WS-Federation flows against a real protocol implementation — before connecting to a production SSO provider.</p>
+        <div class="hero-actions">
+          <a href="/doc/installation" class="btn btn-primary">Get started</a>
+          <a href="/doc/onboarding" class="btn btn-secondary">Onboarding guide</a>
+        </div>
+      </div>
+
+      <!-- Dev & Migration phases -->
+      <p class="section-title">How it fits your workflow</p>
+      <div class="phases">
+        <div class="phase">
+          <div class="phase-label">Development phase</div>
+          <h2>Build your auth integration locally</h2>
+          <ul>
+            <li>Test OIDC, SAML, and WS-Fed flows without external accounts</li>
+            <li>Iterate on MFA — TOTP, push, SMS, magic links, passkeys</li>
+            <li>Debug tokens and assertions in real-time</li>
+            <li>Run integration tests in CI/CD with no external dependencies</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <div class="phase-label">Migration phase</div>
+          <h2>Switch providers with zero code changes</h2>
+          <ul>
+            <li>Swap provider personalities — Okta → Azure AD → Google</li>
+            <li>Export user data and group mappings</li>
+            <li>Compare Furnace responses against real provider responses</li>
+            <li>Gradually shift production traffic while keeping Furnace for dev</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Feature grid -->
+      <p class="section-title">What's included</p>
+      <div class="features">
+        <div class="feature">
+          <div class="feature-icon blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>Protocol support</h3>
+          <p>Full OIDC, SAML 2.0, and WS-Federation implementations. Discovery, JWKS, token exchange, assertions — all included.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon purple">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+          </div>
+          <h3>Provider personalities</h3>
+          <p>Emulate Okta, Azure AD, Google Workspace, GitHub, and OneLogin — including their specific claim shapes and quirks.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          </div>
+          <h3>MFA methods</h3>
+          <p>TOTP, push notifications, SMS, magic links, and WebAuthn/passkeys — all simulatable without real authenticators.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <h3>SCIM provisioning</h3>
+          <p>Full SCIM 2.0 for user and group management. Supports inbound provisioning and outbound push to an external SCIM target.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <h3>Real-time admin UI</h3>
+          <p>SSE-powered dashboard showing live users, groups, flows, and sessions. Notifications update without a page refresh.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon indigo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>
+          </div>
+          <h3>Multi-tenancy</h3>
+          <p>Isolated tenant namespaces with per-tenant users, groups, and flows. Single binary, multiple virtual environments.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon rose">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <h3>CI/CD ready</h3>
+          <p>No external accounts or network calls. A single <code class="code-rose">docker run</code> starts a fully functional auth server for integration tests.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon slate">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          </div>
+          <h3>SQLite persistence</h3>
+          <p>Data survives restarts when mounted as a Docker volume. In-memory mode available for stateless CI runs.</p>
+        </div>
+      </div>
+
+      <!-- Quick start -->
+      <div class="quickstart">
+        <h2>Quick start</h2>
+        <p class="sub">Pull the published image and open <strong>http://localhost:8025</strong> once the container starts.</p>
+        <pre><code>docker run --rm \
+  -p 8025:8025 \
+  -p 8026:8026 \
+  -v furnace_data:/data \
+  callezenwaka/furnace:latest</code></pre>
+        <p class="quickstart-note">The admin API key is auto-generated on first start. Find it at <strong>Admin UI → Config → Admin API Key</strong>.</p>
+      </div>
+
+      <!-- Ports -->
+      <p class="section-title">Ports</p>
+      <div class="ports">
+        <div class="port">
+          <span class="port-badge">:8025</span>
+          <div>
+            <h3>Management</h3>
+            <p>Admin UI (<code>/admin</code>), management API (<code>/api/v1</code>), and login UI (<code>/login</code>).</p>
+          </div>
+        </div>
+        <div class="port">
+          <span class="port-badge">:8026</span>
+          <div>
+            <h3>Protocol</h3>
+            <p>OIDC, SAML, and WS-Federation endpoints. Point your OIDC client's issuer here.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</body>
+</html>

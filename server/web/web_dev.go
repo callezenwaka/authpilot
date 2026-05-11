@@ -33,3 +33,8 @@ func ReadDoc(name string) ([]byte, error) {
 func FaviconSVG() ([]byte, error) {
 	return os.ReadFile(filepath.Join("server", "web", "static", "favicon.svg"))
 }
+
+// LogoSVG reads the wordmark SVG from disk.
+func LogoSVG() ([]byte, error) {
+	return os.ReadFile(filepath.Join("server", "web", "static", "furnace.svg"))
+}

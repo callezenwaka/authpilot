@@ -128,3 +128,8 @@ Furnace binds to `0.0.0.0` by default. Before exposing to a network:
 - Set `FURNACE_CORS_ORIGINS` to your admin SPA origin.
 - Place Furnace behind a TLS-terminating reverse proxy (nginx, Caddy, or a load
   balancer). WebAuthn requires HTTPS for any origin other than `localhost`.
+
+
+---
+
+Next: [Login Simulation →](/doc/login-simulation)

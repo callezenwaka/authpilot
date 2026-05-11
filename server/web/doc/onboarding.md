@@ -121,3 +121,8 @@ curl -X POST $FURNACE_URL/api/v1/tokens/mint \
   -H "Content-Type: application/json" \
   -d '{"user_id":"usr_bob","client_id":"myapp","expires_in":3600}'
 ```
+
+
+---
+
+Next: [Providers →](/doc/providers)

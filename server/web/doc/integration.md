@@ -390,3 +390,8 @@ curl -X POST http://localhost:8025/api/v1/opa/evaluate \
 ```
 
 Returns a `results_by_provider` map showing each provider's decision side by side.
+
+
+---
+
+Next: [API Reference →](/doc/api-reference)

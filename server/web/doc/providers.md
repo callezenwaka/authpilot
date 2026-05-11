@@ -552,3 +552,8 @@ After the login flow, inspect the token against Furnace's introspect endpoint or
 <p>Verify <code>params</code> is present and contains the expected keys. Test both the happy path (correct params populated) and the empty-params path to confirm your app handles absent custom attributes gracefully.</p>
 </div>
 </div>
+
+
+---
+
+Next: [Integration Guide →](/doc/integration)

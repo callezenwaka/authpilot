@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"html/template"
 	"net/http"
-	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/yuin/goldmark"
@@ -66,13 +65,20 @@ func docHandler() http.HandlerFunc {
 	}
 }
 
+func docHomeHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tmpl, err := web.ParseTemplate("doc-home.html")
+		if err != nil {
+			http.Error(w, "template error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = tmpl.Execute(w, nil)
+	}
+}
+
 func docIndexHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// /doc redirects to the onboarding page as the default entry point.
-		target := "/doc/onboarding"
-		if !strings.HasSuffix(r.URL.Path, "/") {
-			target = r.URL.Path + "/onboarding"
-		}
-		http.Redirect(w, r, target, http.StatusFound)
+		http.Redirect(w, r, "/doc/index", http.StatusFound)
 	}
 }

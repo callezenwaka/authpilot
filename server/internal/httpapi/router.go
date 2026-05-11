@@ -156,6 +156,7 @@ func NewRouter(dep Dependencies) http.Handler {
 	registerAdminRoutes(r, dep.AdminStaticDir, dep.AdminFS, dep.APIKey, dep.SessionHashKey, dep.Admins, dep.AdminCookieKey)
 
 	r.HandleFunc("/favicon.svg", faviconHandler()).Methods(http.MethodGet)
+	r.HandleFunc("/furnace.svg", logoHandler()).Methods(http.MethodGet)
 	r.HandleFunc("/", homeHandler(dep.APIKey)).Methods(http.MethodGet)
 
 	r.HandleFunc("/health", healthHandler).Methods(http.MethodGet)
@@ -209,6 +210,7 @@ func NewRouter(dep Dependencies) http.Handler {
 
 	// Docs — public, no auth required.
 	r.HandleFunc("/doc", docIndexHandler()).Methods(http.MethodGet)
+	r.HandleFunc("/doc/index", docHomeHandler()).Methods(http.MethodGet)
 	r.HandleFunc("/doc/{slug}", docHandler()).Methods(http.MethodGet)
 
 	// WebAuthn flow endpoints are called by the end-user's browser from mfa.html,
@@ -605,6 +607,19 @@ func serveAdminIndex(indexPath, apiKey, sessionHashKey string) http.HandlerFunc 
 
 func faviconHandler() http.HandlerFunc {
 	data, err := web.FaviconSVG()
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if err != nil {
+			http.NotFound(w, nil)
+			return
+		}
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(data)
+	}
+}
+
+func logoHandler() http.HandlerFunc {
+	data, err := web.LogoSVG()
 	return func(w http.ResponseWriter, _ *http.Request) {
 		if err != nil {
 			http.NotFound(w, nil)

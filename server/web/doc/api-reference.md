@@ -210,3 +210,8 @@ Requests over the limit receive `429 Too Many Requests` with `Retry-After` and
   "request_id": "req_01abc..."
 }
 ```
+
+
+---
+
+Next: [Configuration →](/doc/configuration)

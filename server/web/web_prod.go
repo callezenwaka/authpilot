@@ -19,8 +19,8 @@ var embeddedDoc embed.FS
 //go:embed static/admin
 var embeddedAdmin embed.FS
 
-//go:embed static/favicon.svg
-var embeddedFaviconFS embed.FS
+//go:embed static/favicon.svg static/furnace.svg
+var embeddedStaticFS embed.FS
 
 // AdminFS is the embedded admin SPA rooted at static/admin.
 var AdminFS fs.FS = func() fs.FS {
@@ -36,7 +36,7 @@ var (
 
 func initTemplates() {
 	parsed = make(map[string]*template.Template)
-	for _, name := range []string{"home.html", "login.html", "mfa.html", "complete.html", "doc.html", "admin_login.html"} {
+	for _, name := range []string{"home.html", "login.html", "mfa.html", "complete.html", "doc.html", "doc-home.html", "admin_login.html"} {
 		data, err := embeddedTemplates.ReadFile("templates/" + name)
 		if err != nil {
 			parseErr = fmt.Errorf("read embedded template %s: %w", name, err)
@@ -72,5 +72,10 @@ func ReadDoc(name string) ([]byte, error) {
 
 // FaviconSVG returns the embedded favicon SVG bytes.
 func FaviconSVG() ([]byte, error) {
-	return embeddedFaviconFS.ReadFile("static/favicon.svg")
+	return embeddedStaticFS.ReadFile("static/favicon.svg")
+}
+
+// LogoSVG returns the embedded wordmark SVG bytes.
+func LogoSVG() ([]byte, error) {
+	return embeddedStaticFS.ReadFile("static/furnace.svg")
 }
