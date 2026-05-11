@@ -95,14 +95,14 @@
       <a href="/doc/security">Security</a>
       <a href="/doc/login-simulation">Login Simulation</a>
     </nav>
-    <hr class="sidebar-divider">
+    {{if .Local}}<hr class="sidebar-divider">
     <div class="sidebar-footer">
       <a href="/admin">Admin UI</a>
       <span class="sidebar-footer-sep">&bull;</span>
       <a href="/api/v1/docs">API Docs</a>
       <span class="sidebar-footer-sep">&bull;</span>
       <a href="/login">Login</a>
-    </div>
+    </div>{{end}}
   </aside>
 
   <main class="content">

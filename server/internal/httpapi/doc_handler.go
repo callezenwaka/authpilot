@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/yuin/goldmark"
@@ -12,6 +13,13 @@ import (
 
 	"furnace/server/web"
 )
+
+func isLocal(r *http.Request) bool {
+	h := r.Host
+	return strings.HasPrefix(h, "localhost") ||
+		strings.HasPrefix(h, "127.0.0.1") ||
+		strings.HasPrefix(h, "[::1]")
+}
 
 var md = goldmark.New(
 	goldmark.WithExtensions(extension.GFM),
@@ -61,6 +69,7 @@ func docHandler() http.HandlerFunc {
 			"Slug":  slug,
 			"Title": title,
 			"Body":  template.HTML(buf.String()),
+			"Local": isLocal(r),
 		})
 	}
 }
@@ -73,7 +82,9 @@ func docHomeHandler() http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = tmpl.Execute(w, nil)
+		_ = tmpl.Execute(w, map[string]any{
+			"Local": isLocal(r),
+		})
 	}
 }
 

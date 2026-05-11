@@ -1,0 +1,13 @@
+[build]
+  publish = "docs"
+  command = "go run ./cmd/docbuild"
+
+[[redirects]]
+  from = "/"
+  to = "/doc/index/"
+  status = 302
+
+[[redirects]]
+  from = "/doc"
+  to = "/doc/index/"
+  status = 302
