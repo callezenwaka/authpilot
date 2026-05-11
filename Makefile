@@ -1,4 +1,4 @@
-.PHONY: build test lint check-ports run run-auto run-default run-bg stop health admin-build notify-build dev setup
+.PHONY: build test lint check-ports run run-auto run-default run-bg stop health admin-build notify-build dev setup version
 
 -include .env
 export
@@ -175,3 +175,6 @@ setup:
 
 admin-build:
 	cd client && npm install && npm run build
+
+version:
+	@git describe --tags --match "server/v*" --always
