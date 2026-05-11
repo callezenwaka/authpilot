@@ -1,11 +1,11 @@
-FROM node:22-alpine AS spa-builder
+FROM node:26-alpine AS client
 WORKDIR /src
 COPY client/package*.json client/
 RUN cd client && npm ci
 COPY client client
 RUN cd client && npm run build
 
-FROM golang:1.26.2-alpine3.23 AS builder
+FROM golang:1.26.3-alpine3.23 AS builder
 
 # Upgrade Alpine packages to clear known CVEs in the builder layer.
 # The final image is chainguard/static and carries none of these packages.
@@ -17,7 +17,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-COPY --from=spa-builder /src/server/web/static/admin server/web/static/admin
+COPY --from=client /src/server/web/static/admin server/web/static/admin
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags prod -o /out/furnace ./server/cmd/furnace
 RUN mkdir -p /data
