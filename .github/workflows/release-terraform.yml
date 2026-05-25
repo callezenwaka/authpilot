@@ -8,15 +8,12 @@ on:
 permissions:
   contents: write   # create GitHub Release + upload assets
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   release:
     name: GoReleaser (Terraform provider)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

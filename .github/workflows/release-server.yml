@@ -10,7 +10,6 @@ permissions:
   packages: write      # push to ghcr.io
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/furnace
 
@@ -19,7 +18,7 @@ jobs:
     name: GoReleaser + Docker
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # GoReleaser needs full history for changelog
 
