@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write      # create GitHub Release + upload assets
   packages: write      # push to ghcr.io
+  id-token: write      # sign provenance attestations via OIDC
 
 env:
   REGISTRY: ghcr.io
@@ -60,6 +61,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          sbom: true
+          provenance: mode=max
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

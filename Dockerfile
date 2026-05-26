@@ -19,7 +19,8 @@ RUN go mod download
 COPY . .
 COPY --from=client /src/server/web/static/admin server/web/static/admin
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags prod -o /out/furnace ./server/cmd/furnace
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -tags prod -o /out/furnace ./server/cmd/furnace
 RUN mkdir -p /data
 
 FROM cgr.dev/chainguard/static:latest
